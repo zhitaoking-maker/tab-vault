@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="ui.css">
+    <title>Tab Vault</title>
+  </head>
+  <body class="popup-body">
+    <main class="panel">
+      <header class="panel-header">
+        <div>
+          <p class="eyebrow">TAB VAULT</p>
+          <h1>工作区</h1>
+        </div>
+        <button id="open-dashboard" class="icon-command" type="button" title="打开总览">总览</button>
+      </header>
+      <button id="save-current" class="save-button" type="button">压缩当前窗口</button>
+      <section id="undo-bar" class="undo-bar" hidden>
+        <span id="undo-text"></span>
+        <button id="undo-save" type="button">撤销</button>
+      </section>
+      <p id="status" class="status" aria-live="polite"></p>
+      <section class="timeline-section">
+        <div class="section-heading">
+          <h2>最近保存</h2>
+          <span id="workspace-count"></span>
+        </div>
+        <div id="workspace-list" class="workspace-list"></div>
+      </section>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

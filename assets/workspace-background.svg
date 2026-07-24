@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 720" role="img" aria-label="Abstract workspace background">
+  <rect width="900" height="720" fill="#141817"/>
+  <path d="M390 0h510v720H510L690 545 530 370 760 0z" fill="#1d2923"/>
+  <path d="M590 0h310v515L760 395 630 235 735 0z" fill="#26372d"/>
+  <path d="M900 117v603H654l152-165-140-155 151-165z" fill="#1b221d"/>
+  <path d="M690 545l210 175H510z" fill="#b2cf68" fill-opacity=".18"/>
+  <path d="M760 395l140 120v-398z" fill="#d5ef85" fill-opacity=".16"/>
+</svg>

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="ui.css">
+    <title>Tab Vault 工作区总览</title>
+  </head>
+  <body class="dashboard-body">
+    <main class="dashboard-shell">
+      <header class="dashboard-header">
+        <div>
+          <p class="eyebrow">TAB VAULT</p>
+          <h1>工作区</h1>
+          <p class="subtitle">这里放着你暂时离开的网页现场。</p>
+        </div>
+        <button id="appearance-toggle" class="icon-command" type="button">外观</button>
+      </header>
+      <section class="timeline-board">
+        <form id="appearance-panel" class="appearance-panel" hidden>
+          <button id="appearance-close" class="appearance-close" type="button" aria-label="关闭外观设置">×</button>
+          <label class="background-file-control">上传背景
+            <input id="background-file" type="file" accept="image/png,image/jpeg,image/webp">
+            <small>支持 PNG、JPEG、WebP，小于 5 MB</small>
+          </label>
+          <label class="background-dim-control">遮罩强度
+            <input id="background-dim" type="range" min="45" max="92" value="78">
+          </label>
+          <label class="accent-color-control">主题色
+            <input id="accent-color" type="color" value="#c5e36b">
+          </label>
+          <button id="background-remove" class="button button-danger" type="button">移除背景</button>
+        </form>
+        <label class="workspace-search">搜索工作区
+          <input id="workspace-search" type="search" placeholder="名称、网页标题或网站">
+        </label>
+        <section id="undo-bar" class="undo-bar dashboard-undo" hidden>
+          <span id="undo-text"></span>
+          <button id="undo-save" type="button">撤销</button>
+        </section>
+        <div class="section-heading">
+          <h2>已保存的工作区</h2>
+          <span id="workspace-count"></span>
+        </div>
+        <p id="status" class="status" aria-live="polite"></p>
+        <div id="workspace-list" class="workspace-list dashboard-list"></div>
+      </section>
+    </main>
+    <script type="module" src="dashboard.js"></script>
+  </body>
+</html>
