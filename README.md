@@ -1,88 +1,84 @@
 # Tab Vault
 
-**A local-first Chrome tab workspace manager.**
+> 本地优先的 Chrome 标签工作区管理器（Chrome tab workspace manager / tab session manager）。
 
-Save a browser window as a workspace, close the original tabs, and restore the full workspace in one click. Tab Vault is built for people who regularly leave a dense research, planning, or browsing session and want to return to it without keeping every tab open.
+Tab Vault 用来处理一个很具体的时刻：你暂时离开一组研究、规划或浏览中的网页，想把窗口清空，但不想失去回到现场的能力。
 
-No account. No cloud sync. Your workspace data stays in the browser profile where the extension is installed.
+它会把当前浏览器窗口保存为一个本地工作区快照，关闭原网页标签；需要时，再把整组标签恢复到新窗口。无需账号、没有云同步，工作区数据只保存在安装扩展的浏览器本地。
 
-## Why Tab Vault
+## 它解决什么问题
 
-Most tab managers help you collect or search tabs. Tab Vault focuses on a different moment: you are done with a working session for now, want to clear the window, and still need a reliable way back later.
+普通标签管理工具大多帮助你收集、搜索或整理标签。Tab Vault 更关注「暂时收起一整个工作现场」：
 
-- Save the current window as an immutable workspace snapshot.
-- Close the saved web tabs immediately, with a short undo window.
-- Restore an entire workspace into a separate window without changing the current one.
-- Restore only selected tabs, rename a workspace, pin it, or delete saved tabs you no longer need.
-- Keep the dashboard local, searchable, and customizable with a background image and accent color.
+- 将当前窗口保存为不可变的工作区快照。
+- 保存后立刻关闭原网页标签，真正释放窗口。
+- 压缩后 10 秒内可撤销，并恢复回原窗口。
+- 完整恢复会在新窗口打开，不影响你正在使用的窗口。
+- 可以只恢复或删除选中的标签；工作区也支持改名、置顶、搜索和预览。
+- 总览页支持本地背景图和主题色，不影响标签数据的本地存储方式。
 
-## Install Locally
+## 本地安装
 
-Tab Vault is currently distributed as an unpacked Chrome extension.
+Tab Vault 目前以未打包 Chrome 扩展的形式发布。
 
-1. Clone or download this repository.
+1. 克隆或下载这个仓库。
 
    ```bash
    git clone https://github.com/zhitaoking-maker/tab-vault.git
    ```
 
-2. Open Chrome's extension menu, then select **Manage extensions**.
+2. 打开 Chrome 的扩展程序菜单，点击「管理扩展程序」。
 
-   ![Open Chrome extension management](docs/images/open-extensions.png)
+   ![打开 Chrome 扩展程序管理页](docs/images/open-extensions.png)
 
-3. Turn on **Developer mode**, click **Load unpacked**, and select the cloned `tab-vault` folder. Select the folder that contains `manifest.json`, not its parent directory.
+3. 打开右上角「开发者模式」，点击「加载已解压的扩展程序」，并选择克隆后的 `tab-vault` 文件夹。
 
-   ![Load the unpacked extension](docs/images/load-unpacked.png)
+   必须选择包含 `manifest.json` 的目录，不能选择它的上一级目录。
 
-4. Pin **Tab Vault** from Chrome's extension menu if you want one-click access from the toolbar.
+   ![加载已解压的扩展程序](docs/images/load-unpacked.png)
 
-## How It Works
+4. 你可以在 Chrome 扩展程序菜单中将 Tab Vault 固定到工具栏，方便随时压缩当前窗口。
 
-1. Open the Tab Vault popup and select **Compress current window**.
-2. The current HTTP/HTTPS tabs are saved locally, then closed. The dashboard opens in their place.
-3. Use **Undo** within 10 seconds to restore the tabs to the original window.
-4. From the dashboard, preview a workspace, restore all tabs in a new window, restore selected tabs, or remove selected saved tabs.
+## 使用方式
 
-Workspaces remain in the timeline after restoration until you explicitly delete them.
+1. 点击工具栏里的 Tab Vault 图标，选择「压缩当前窗口」。
+2. 当前窗口中的 HTTP/HTTPS 网页会被保存到本地，然后关闭；工作区总览会在原窗口打开。
+3. 在 10 秒内点击「撤销」，可将标签恢复回原窗口。
+4. 在总览中展开工作区，可预览标签、勾选后恢复或删除；点击「恢复」会将整组工作区打开到新窗口。
 
-## Privacy And Permissions
+恢复工作区不会自动删除这条记录。它会一直保留在时间线中，直到你明确删除它。
 
-Tab Vault does not send workspace data anywhere.
+## 隐私与权限
 
-| Permission | Why it is needed |
+Tab Vault 不会将工作区数据发送到任何服务器。
+
+| 权限 | 用途 |
 | --- | --- |
-| `tabs` | Read tab URLs, titles, order, and pinned state; close saved tabs; create restored tabs. |
-| `storage` | Save workspaces, the short undo record, and appearance preferences in the local browser profile. |
-| `alarms` | Reliably expire the 10-second undo action when the dashboard is not active. |
+| `tabs` | 读取标签的 URL、标题、顺序和固定状态；关闭已保存标签；创建恢复的标签。 |
+| `storage` | 将工作区、短时撤销记录和外观设置保存到本地浏览器配置中。 |
+| `alarms` | 在总览页不活跃时，仍能可靠地让 10 秒撤销操作到期。 |
 
-The extension stores tab-level metadata only. It does not save page contents, cookies, login state, form input, scroll position, or browsing data outside its own local extension storage.
+扩展只保存标签级元数据，不保存网页正文、Cookie、登录状态、表单输入、滚动位置，也不会读取扩展自身本地存储以外的浏览数据。
 
-## Development
+## 开发
 
-Requirements: Chrome desktop and a current Node.js runtime.
+需要 Chrome 桌面版和较新的 Node.js 运行时。
 
 ```bash
 npm test
 npm run test:coverage
 ```
 
-The extension uses Manifest V3 and plain JavaScript. Load the project directory through `chrome://extensions` during development.
+项目使用 Manifest V3 和原生 JavaScript。开发时可通过 `chrome://extensions` 加载项目目录。
 
-`npm run test:extension` is an optional smoke test for Chromium builds that permit headless unpacked-extension loading. Chrome release builds can reject that launch mode, so manual loading remains the end-to-end verification path.
+`npm run test:extension` 是面向允许无头加载未打包扩展的 Chromium 环境的冒烟测试。正式版 Chrome 可能拒绝这种启动方式，因此实际加载扩展仍需要手动验收。
 
-## Roadmap
+## 后续方向
 
-- Import and export local workspaces.
-- Better bulk management for large timelines.
-- Optional sync only if it can preserve the local-first privacy model.
+- 导入和导出本地工作区。
+- 大量工作区的批量管理。
+- 只有在不破坏本地优先和隐私边界的前提下，才考虑可选同步。
 
 ## License
 
 [MIT](LICENSE)
-
----
-
-## 中文说明
-
-Tab Vault 是一个本地优先的 Chrome 标签工作区管理扩展。它会将当前窗口保存为工作区快照、关闭原网页标签，并在需要时一键恢复。数据只保存在浏览器本地，不需要登录，也不会上传到云端。
-
