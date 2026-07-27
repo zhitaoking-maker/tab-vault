@@ -1,11 +1,12 @@
 {
   "name": "tab-vault",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test",
     "test:coverage": "node --experimental-test-coverage --test",
+    "test:dashboard": "node tests/dashboard-browser.mjs",
     "test:extension": "node tests/extension-smoke.mjs"
   }
 }

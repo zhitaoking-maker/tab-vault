@@ -10,6 +10,9 @@ function createChromeMock({ incognitoWindowIds = [] } = {}) {
   const createdTabs = [];
   const createdWindows = [];
   const alarmCreates = [];
+  const runtimeMessages = [];
+  const groupedTabs = [];
+  const updatedGroups = [];
   const tabs = [
     { id: 101, windowId: 1, index: 0, url: 'https://first.example/', title: 'First', active: true },
     { id: 201, windowId: 2, index: 0, url: 'https://second.example/', title: 'Second', active: true },
@@ -20,7 +23,13 @@ function createChromeMock({ incognitoWindowIds = [] } = {}) {
 
   return {
     api: {
-      runtime: { getURL: (path) => `chrome-extension://tab-vault/${path}` },
+      runtime: {
+        getURL: (path) => `chrome-extension://tab-vault/${path}`,
+        getManifest: () => ({ version: '0.3.0' }),
+        async sendMessage(message) {
+          runtimeMessages.push(message);
+        },
+      },
       alarms: {
         async create(name, info) {
           alarmCreates.push({ name, info });
@@ -58,6 +67,19 @@ function createChromeMock({ incognitoWindowIds = [] } = {}) {
         async remove(ids) {
           removedTabs.push(...(Array.isArray(ids) ? ids : [ids]));
         },
+        async group(details) {
+          groupedTabs.push(details);
+          return 700 + groupedTabs.length;
+        },
+      },
+      tabGroups: {
+        async get(groupId) {
+          return { id: groupId, title: '研究', color: 'blue', collapsed: true };
+        },
+        async update(groupId, changes) {
+          updatedGroups.push({ groupId, changes });
+          return { id: groupId, ...changes };
+        },
       },
       storage: {
         local: {
@@ -78,9 +100,12 @@ function createChromeMock({ incognitoWindowIds = [] } = {}) {
     createdTabs,
     createdWindows,
     alarmCreates,
+    groupedTabs,
     getCurrentCalls: () => getCurrentCalls,
     removedTabs,
+    runtimeMessages,
     storage,
+    updatedGroups,
   };
 }
 
@@ -177,7 +202,7 @@ test('background exports, previews, and non-destructively imports workspaces', a
   const imported = await handleMessage({ type: 'import-workspaces', text }, mock.api);
 
   assert.equal(exported.exported, true);
-  assert.equal(exported.payload.schemaVersion, 1);
+  assert.equal(exported.payload.schemaVersion, 2);
   assert.equal(preview.valid, true);
   assert.equal(preview.workspaceCount, 1);
   assert.equal(preview.duplicateCount, 1);
@@ -204,6 +229,43 @@ test('background batch deletion moves every selected workspace to trash', async 
   assert.equal(result.deletedCount, 2);
   assert.deepEqual(mock.storage.workspaces.map((item) => item.id), [second.id]);
   assert.deepEqual(new Set(mock.storage.trash.map((item) => item.id)), new Set([first.id, third.id]));
+});
+
+test('background batch pinning updates every selected workspace', async () => {
+  const mock = createChromeMock();
+  const first = buildWorkspace([]);
+  const second = buildWorkspace([]);
+  mock.storage.workspaces = [first, second];
+
+  const pinned = await handleMessage({
+    type: 'set-workspaces-pin',
+    workspaceIds: [first.id, second.id],
+    pinned: true,
+  }, mock.api);
+
+  assert.deepEqual(pinned, { pinned: true, updatedCount: 2 });
+  assert.ok(mock.storage.workspaces.every((workspace) => workspace.pinned));
+});
+
+test('background forwards restore progress events for the active dashboard job', async () => {
+  const mock = createChromeMock();
+  const workspace = buildWorkspace([
+    { index: 0, url: 'https://restore.example/', title: 'Restore', active: true },
+    { index: 1, url: 'https://second.example/', title: 'Second' },
+  ]);
+  mock.storage.workspaces = [workspace];
+
+  const result = await handleMessage({
+    type: 'restore-workspace',
+    workspaceId: workspace.id,
+    restoreJobId: 'job-1',
+    existingGroupIds: [{ snapshotIndex: 0, groupId: 701 }],
+  }, mock.api);
+
+  assert.equal(result.restored, true);
+  assert.ok(mock.runtimeMessages.length >= 2);
+  assert.ok(mock.runtimeMessages.every((message) => message.type === 'restore-progress' && message.restoreJobId === 'job-1'));
+  assert.equal(mock.runtimeMessages.at(-1).phase, 'complete');
 });
 
 test('background rejects invalid imports, empty exports, and empty batch selections', async () => {

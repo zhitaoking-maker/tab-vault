@@ -8,6 +8,11 @@ import {
   importPreviewMessage,
   restoreResultMessage,
 } from './src/lib/v02-presentation.js';
+import {
+  DEFAULT_WORKSPACE_RENDER_LIMIT,
+  getWorkspaceRenderSlice,
+  restoreProgressMessage,
+} from './src/lib/v03-presentation.js';
 import { createElement, createWorkspaceRow, formatTime, sendMessage } from './shared-ui.js';
 
 const APPEARANCE_KEY = 'appearance';
@@ -28,6 +33,8 @@ const storageLabel = document.querySelector('#storage-label');
 const storageMeter = document.querySelector('#storage-meter');
 const backupSelectionCount = document.querySelector('#backup-selection-count');
 const exportSelected = document.querySelector('#export-selected');
+const pinSelected = document.querySelector('#pin-selected');
+const unpinSelected = document.querySelector('#unpin-selected');
 const trashSelected = document.querySelector('#trash-selected');
 const importFile = document.querySelector('#import-file');
 const importPreview = document.querySelector('#import-preview');
@@ -36,6 +43,11 @@ const importConfirm = document.querySelector('#import-confirm');
 const restoreReport = document.querySelector('#restore-report');
 const restoreReportText = document.querySelector('#restore-report-text');
 const retryRestore = document.querySelector('#retry-restore');
+const restoreProgress = document.querySelector('#restore-progress');
+const restoreProgressText = document.querySelector('#restore-progress-text');
+const restoreProgressCount = document.querySelector('#restore-progress-count');
+const restoreProgressMeter = document.querySelector('#restore-progress-meter');
+const loadMore = document.querySelector('#load-more');
 const backgroundFile = document.querySelector('#background-file');
 const backgroundDim = document.querySelector('#background-dim');
 const backgroundRemove = document.querySelector('#background-remove');
@@ -49,6 +61,9 @@ let timerId = null;
 let backgroundUrl = null;
 let pendingImportText = null;
 let lastRetry = null;
+let activeRestoreJob = null;
+let currentRestoreProgress = null;
+let renderLimit = DEFAULT_WORKSPACE_RENDER_LIMIT;
 let appearance = { enabled: false, dim: 78, accent: DEFAULT_ACCENT_COLOR };
 const selectedTabs = new Map();
 const selectedWorkspaces = new Set();
@@ -74,7 +89,9 @@ function setPanel(panel, open) {
 function showRestoreResult(result, workspaceId) {
   const message = restoreResultMessage(result, true);
   setStatus(message);
-  const hasDetails = Boolean(result.failedCount || result.unsupportedCount || result.pinFailedCount);
+  const hasDetails = Boolean(
+    result.failedCount || result.unsupportedCount || result.pinFailedCount || result.groupFailedCount,
+  );
   restoreReport.hidden = !hasDetails;
   restoreReportText.textContent = message;
   retryRestore.hidden = !result.failedCount;
@@ -82,14 +99,34 @@ function showRestoreResult(result, workspaceId) {
     workspaceId,
     tabIndexes: result.failedTabs.map((tab) => tab.index),
     windowId: result.windowId,
+    existingGroupIds: result.restoredGroups,
   } : null;
 }
 
-async function restore(workspaceId, tabIndexes, windowId) {
-  const result = await sendMessage({ type: 'restore-workspace', workspaceId, tabIndexes, windowId });
-  showRestoreResult(result, workspaceId);
-  if (result.restored) selectedTabs.delete(workspaceId);
-  await refresh();
+async function restore(workspaceId, tabIndexes, windowId, existingGroupIds) {
+  if (activeRestoreJob) return;
+  const restoreJobId = crypto.randomUUID();
+  activeRestoreJob = restoreJobId;
+  currentRestoreProgress = {
+    phase: 'tabs', processedCount: 0, totalCount: 0, restoredCount: 0, failedCount: 0,
+    groupCompletedCount: 0, groupTotalCount: 0,
+  };
+  renderRestoreProgress();
+  render();
+  try {
+    const result = await sendMessage({
+      type: 'restore-workspace', workspaceId, tabIndexes, windowId, restoreJobId, existingGroupIds,
+    });
+    showRestoreResult(result, workspaceId);
+    if (result.restored) selectedTabs.delete(workspaceId);
+  } catch {
+    setStatus('恢复没有完成，请再试一次。');
+  } finally {
+    activeRestoreJob = null;
+    currentRestoreProgress = null;
+    renderRestoreProgress();
+    await refresh();
+  }
 }
 
 function createRow(workspace) {
@@ -99,6 +136,7 @@ function createRow(workspace) {
     selectable: !backupPanel.hidden,
     selected: selectedWorkspaces.has(workspace.id),
     selectedTabIndexes: selectedFor(workspace.id),
+    restoring: Boolean(activeRestoreJob),
     onWorkspaceSelectionChange: (checked) => {
       if (checked) selectedWorkspaces.add(workspace.id);
       else selectedWorkspaces.delete(workspace.id);
@@ -173,7 +211,20 @@ function renderBackupSelection() {
   const selectedCount = selectedWorkspaces.size;
   backupSelectionCount.textContent = selectedCount ? `已选 ${selectedCount} 个工作区` : '未选择工作区';
   exportSelected.disabled = selectedCount === 0;
+  pinSelected.disabled = selectedCount === 0;
+  unpinSelected.disabled = selectedCount === 0;
   trashSelected.disabled = selectedCount === 0;
+}
+
+function renderRestoreProgress() {
+  restoreProgress.hidden = !currentRestoreProgress;
+  if (!currentRestoreProgress) return;
+  const progress = currentRestoreProgress;
+  const totalSteps = progress.totalCount + progress.groupTotalCount;
+  const completedSteps = progress.processedCount + progress.groupCompletedCount;
+  restoreProgressText.textContent = restoreProgressMessage(progress);
+  restoreProgressCount.textContent = totalSteps ? `${completedSteps} / ${totalSteps}` : '准备中';
+  restoreProgressMeter.value = totalSteps ? completedSteps / totalSteps : 0;
 }
 
 function renderStorageHealth() {
@@ -224,17 +275,21 @@ function renderTrash() {
 function render() {
   list.replaceChildren();
   const visible = state.workspaces.filter((workspace) => matchesWorkspaceQuery(workspace, query));
+  const page = getWorkspaceRenderSlice(visible, renderLimit);
   count.textContent = query ? `${visible.length} / ${state.workspaces.length} 条记录` : `${state.workspaces.length} 条记录`;
   if (visible.length === 0) {
     list.append(createElement('p', 'empty-state', query ? '没有匹配的工作区。' : '还没有存下任何工作区。'));
   } else {
-    appendGroup('置顶', visible.filter((workspace) => workspace.pinned));
-    appendGroup('时间线', visible.filter((workspace) => !workspace.pinned));
+    appendGroup('置顶', page.items.filter((workspace) => workspace.pinned));
+    appendGroup('时间线', page.items.filter((workspace) => !workspace.pinned));
   }
+  loadMore.hidden = !page.hasMore;
+  loadMore.textContent = page.hasMore ? `再显示 ${Math.min(DEFAULT_WORKSPACE_RENDER_LIMIT, page.remainingCount)} 条` : '';
   renderUndo();
   renderBackupSelection();
   renderStorageHealth();
   renderTrash();
+  renderRestoreProgress();
 }
 
 function renderUndo() {
@@ -323,7 +378,19 @@ document.querySelector('#undo-save').addEventListener('click', async () => {
 
 searchInput.addEventListener('input', () => {
   query = searchInput.value;
+  renderLimit = DEFAULT_WORKSPACE_RENDER_LIMIT;
   render();
+});
+
+loadMore.addEventListener('click', () => {
+  renderLimit += DEFAULT_WORKSPACE_RENDER_LIMIT;
+  render();
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type !== 'restore-progress' || message.restoreJobId !== activeRestoreJob) return;
+  currentRestoreProgress = message;
+  renderRestoreProgress();
 });
 
 document.addEventListener('visibilitychange', () => {
@@ -351,6 +418,23 @@ document.querySelector('#appearance-close').addEventListener('click', () => setP
 
 document.querySelector('#export-all').addEventListener('click', () => downloadBackup());
 exportSelected.addEventListener('click', () => downloadBackup([...selectedWorkspaces]));
+
+async function setSelectedPinState(pinned) {
+  if (!selectedWorkspaces.size) return;
+  const result = await sendMessage({
+    type: 'set-workspaces-pin',
+    workspaceIds: [...selectedWorkspaces],
+    pinned,
+  });
+  setStatus(result.pinned
+    ? `已${pinned ? '置顶' : '取消置顶'} ${result.updatedCount} 个工作区。`
+    : '请先选择工作区。');
+  selectedWorkspaces.clear();
+  await refresh();
+}
+
+pinSelected.addEventListener('click', () => setSelectedPinState(true));
+unpinSelected.addEventListener('click', () => setSelectedPinState(false));
 
 importFile.addEventListener('change', async () => {
   const file = importFile.files?.[0];
@@ -411,7 +495,12 @@ emptyTrash.addEventListener('click', async () => {
 });
 
 retryRestore.addEventListener('click', () => {
-  if (lastRetry) void restore(lastRetry.workspaceId, lastRetry.tabIndexes, lastRetry.windowId);
+  if (lastRetry) void restore(
+    lastRetry.workspaceId,
+    lastRetry.tabIndexes,
+    lastRetry.windowId,
+    lastRetry.existingGroupIds,
+  );
 });
 
 document.querySelector('#dismiss-restore-report').addEventListener('click', () => {

@@ -15,6 +15,7 @@ export const STORAGE_KEYS = {
 
 const UNDO_DURATION_MS = 10_000;
 const PLACEHOLDER_URL = 'about:blank';
+const TAB_GROUP_COLORS = new Set(['grey', 'blue', 'red', 'yellow', 'green', 'pink', 'purple', 'cyan', 'orange']);
 
 export function isRestorableUrl(url) {
   try {
@@ -27,11 +28,14 @@ export function isRestorableUrl(url) {
 
 export function normalizeWorkspace(workspace) {
   const tabs = Array.isArray(workspace.tabs) ? workspace.tabs.map(normalizeTab) : [];
+  const tabIndexes = new Set(tabs.map((tab) => tab.index));
+  const groups = normalizeTabGroups(workspace.groups, tabIndexes);
   return {
     ...workspace,
     pinned: Boolean(workspace.pinned),
     tabCount: tabs.length,
     tabs,
+    groups,
   };
 }
 
@@ -62,6 +66,19 @@ export function toggleWorkspacePin(workspaces, workspaceId) {
   return updateWorkspaceList(workspaces, workspaceId, (workspace) => ({ ...workspace, pinned: !workspace.pinned }));
 }
 
+export function setWorkspacePins(workspaces, workspaceIds, pinned) {
+  const selectedIds = new Set(Array.isArray(workspaceIds) ? workspaceIds : []);
+  if (!selectedIds.size) return { ok: false, updatedCount: 0, workspaces };
+  let updatedCount = 0;
+  const updated = workspaces.map((workspace) => {
+    if (!selectedIds.has(workspace.id)) return workspace;
+    updatedCount += 1;
+    return { ...normalizeWorkspace(workspace), pinned: Boolean(pinned) };
+  });
+  if (!updatedCount) return { ok: false, updatedCount: 0, workspaces };
+  return { ok: true, updatedCount, workspaces: sortWorkspaces(updated) };
+}
+
 export function deleteWorkspaceTabs(workspaces, workspaceId, tabIndexes) {
   const selectedIndexes = new Set(Array.isArray(tabIndexes) ? tabIndexes.filter(Number.isInteger) : []);
   if (selectedIndexes.size === 0) return { ok: false, workspaces, removedTabCount: 0, workspaceDeleted: false };
@@ -84,7 +101,12 @@ export function deleteWorkspaceTabs(workspaces, workspaceId, tabIndexes) {
   }
 
   const updated = [...workspaces];
-  updated[workspaceIndex] = { ...workspace, tabs, tabCount: tabs.length };
+  updated[workspaceIndex] = {
+    ...workspace,
+    tabs,
+    tabCount: tabs.length,
+    groups: normalizeTabGroups(workspace.groups, new Set(tabs.map((tab) => tab.index))),
+  };
   return {
     ok: true,
     workspaces: sortWorkspaces(updated),
@@ -113,10 +135,58 @@ function normalizeTab(tab) {
   };
 }
 
-export function buildWorkspace(tabs, now = new Date()) {
+function normalizeTabGroups(groups, allowedTabIndexes) {
+  if (!Array.isArray(groups)) return [];
+  const normalized = [];
+  for (const group of groups) {
+    if (!group || typeof group !== 'object') continue;
+    const tabIndexes = [...new Set(
+      (Array.isArray(group.tabIndexes) ? group.tabIndexes : [])
+        .filter((index) => Number.isInteger(index) && allowedTabIndexes.has(index)),
+    )].sort((left, right) => left - right);
+    if (!tabIndexes.length) continue;
+    normalized.push({
+      title: typeof group.title === 'string' ? group.title : '',
+      color: TAB_GROUP_COLORS.has(group.color) ? group.color : 'grey',
+      collapsed: Boolean(group.collapsed),
+      tabIndexes,
+    });
+  }
+  return normalized;
+}
+
+export async function captureTabGroups(chromeApi, tabs) {
+  if (!chromeApi.tabGroups?.get) return [];
+  const groupIds = [...new Set(tabs
+    .map((tab) => tab.groupId)
+    .filter((groupId) => Number.isInteger(groupId) && groupId >= 0))];
+  const groups = [];
+  for (const groupId of groupIds) {
+    try {
+      const group = await chromeApi.tabGroups.get(groupId);
+      groups.push({
+        title: group.title || '',
+        color: TAB_GROUP_COLORS.has(group.color) ? group.color : 'grey',
+        collapsed: Boolean(group.collapsed),
+        tabIndexes: tabs
+          .filter((tab) => tab.groupId === groupId)
+          .map((tab) => tab.index)
+          .filter(Number.isInteger)
+          .sort((left, right) => left - right),
+      });
+    } catch {
+      // A group can disappear while the snapshot is being captured.
+    }
+  }
+  const allowedTabIndexes = new Set(tabs.map((tab) => tab.index));
+  return normalizeTabGroups(groups, allowedTabIndexes);
+}
+
+export function buildWorkspace(tabs, now = new Date(), groups = []) {
   const orderedTabs = [...tabs]
     .sort((left, right) => left.index - right.index)
     .map(normalizeTab);
+  const tabIndexes = new Set(orderedTabs.map((tab) => tab.index));
 
   return {
     id: makeId(),
@@ -126,6 +196,7 @@ export function buildWorkspace(tabs, now = new Date()) {
     pinned: false,
     tabCount: orderedTabs.length,
     tabs: orderedTabs,
+    groups: normalizeTabGroups(groups, tabIndexes),
   };
 }
 
@@ -182,7 +253,8 @@ export async function saveCurrentWindow(chromeApi, windowId, { now = new Date(),
   const recoverableTabs = tabs.filter((tab) => isRestorableUrl(tab.url));
   if (recoverableTabs.length === 0) return { saved: false, reason: 'no-recoverable-tabs' };
 
-  const workspace = buildWorkspace(recoverableTabs, now);
+  const groups = await captureTabGroups(chromeApi, recoverableTabs);
+  const workspace = buildWorkspace(recoverableTabs, now, groups);
   const previous = await getLocal(chromeApi, [STORAGE_KEYS.workspaces]);
   const workspaces = Array.isArray(previous.workspaces) ? previous.workspaces : [];
   const existingLanding = tabs.find((tab) => tab.url === placeholderUrl);
@@ -238,12 +310,47 @@ function getRestorationPlan(workspace, { tabIndexes } = {}) {
   };
 }
 
-export async function restoreWorkspace(chromeApi, workspace, { windowId, replaceTabId, tabIndexes } = {}) {
-  const { restorableTabs, skippedDuplicateCount, skippedUnsupportedCount } = getRestorationPlan(workspace, {
+export async function restoreWorkspace(chromeApi, workspace, {
+  windowId,
+  replaceTabId,
+  tabIndexes,
+  onProgress,
+  existingGroupIds,
+} = {}) {
+  const normalizedWorkspace = normalizeWorkspace(workspace);
+  const { restorableTabs, skippedDuplicateCount, skippedUnsupportedCount } = getRestorationPlan(normalizedWorkspace, {
     tabIndexes,
   });
+  const selectedIndexes = new Set(restorableTabs.map((tab) => tab.index));
+  const restorableGroups = normalizedWorkspace.groups
+    .map((group, snapshotIndex) => ({ group, snapshotIndex }))
+    .filter(({ group }) => group.tabIndexes.some((index) => selectedIndexes.has(index)));
+  const existingGroups = new Map((Array.isArray(existingGroupIds) ? existingGroupIds : [])
+    .filter((item) => Number.isInteger(item?.snapshotIndex) && Number.isInteger(item?.groupId))
+    .map((item) => [item.snapshotIndex, item.groupId]));
+  const totalCount = restorableTabs.length;
+  const groupTotalCount = restorableGroups.length;
+  const emitProgress = async (phase, restoredCount, failedCount, groupCompletedCount = 0) => {
+    if (typeof onProgress !== 'function') return;
+    try {
+      await onProgress({
+        phase,
+        processedCount: restoredCount + failedCount,
+        totalCount,
+        restoredCount,
+        failedCount,
+        groupCompletedCount,
+        groupTotalCount,
+      });
+    } catch {
+      // Progress reporting must never interrupt the actual restore.
+    }
+  };
+
+  await emitProgress('tabs', 0, 0);
 
   if (restorableTabs.length === 0) {
+    await emitProgress('complete', 0, 0);
     return {
       restoredCount: 0,
       failedCount: 0,
@@ -253,11 +360,15 @@ export async function restoreWorkspace(chromeApi, workspace, { windowId, replace
       skippedUnsupportedCount,
       unsupportedCount: skippedUnsupportedCount,
       pinFailedCount: 0,
+      groupRestoredCount: 0,
+      groupFailedCount: 0,
+      restoredGroups: [],
     };
   }
 
   let targetWindowId = windowId;
   const restored = new Map();
+  const failedTabs = [];
   const openingTab = restorableTabs.find((tab) => tab.active) ?? restorableTabs[0];
   let createdOpeningTab = null;
 
@@ -275,6 +386,7 @@ export async function restoreWorkspace(chromeApi, workspace, { windowId, replace
           windowId: targetWindowId,
           url: candidate.url,
         });
+        await emitProgress('tabs', restored.size, failedTabs.length);
         break;
       } catch {
         // Try another URL before reporting the entire restore as failed.
@@ -282,9 +394,9 @@ export async function restoreWorkspace(chromeApi, workspace, { windowId, replace
     }
   }
 
-  const failedTabs = [];
   if (!targetWindowId) {
     for (const tab of restorableTabs) failedTabs.push({ index: tab.index, url: tab.url, title: tab.title, reason: 'window-create-failed' });
+    await emitProgress('complete', 0, failedTabs.length);
     return {
       restoredCount: 0,
       failedCount: failedTabs.length,
@@ -294,6 +406,9 @@ export async function restoreWorkspace(chromeApi, workspace, { windowId, replace
       skippedUnsupportedCount,
       unsupportedCount: skippedUnsupportedCount,
       pinFailedCount: 0,
+      groupRestoredCount: 0,
+      groupFailedCount: 0,
+      restoredGroups: [],
     };
   }
 
@@ -309,6 +424,7 @@ export async function restoreWorkspace(chromeApi, workspace, { windowId, replace
     } catch (error) {
       failedTabs.push({ index: tab.index, url: tab.url, title: tab.title, reason: error.message || 'tab-create-failed' });
     }
+    await emitProgress('tabs', restored.size, failedTabs.length);
   }
 
   let pinFailedCount = 0;
@@ -322,6 +438,34 @@ export async function restoreWorkspace(chromeApi, workspace, { windowId, replace
     }
   }
 
+  let groupRestoredCount = 0;
+  let groupFailedCount = 0;
+  const restoredGroups = [];
+  if (groupTotalCount) await emitProgress('groups', restored.size, failedTabs.length, 0);
+  for (const { group, snapshotIndex } of restorableGroups) {
+    const tabIds = group.tabIndexes
+      .map((index) => restored.get(index)?.id)
+      .filter(Number.isInteger);
+    if (!tabIds.length) continue;
+    let groupId;
+    try {
+      const existingGroupId = existingGroups.get(snapshotIndex);
+      groupId = await chromeApi.tabs.group(existingGroupId === undefined
+        ? { tabIds, createProperties: { windowId: targetWindowId } }
+        : { tabIds, groupId: existingGroupId });
+      restoredGroups.push({ snapshotIndex, groupId });
+      await chromeApi.tabGroups.update(groupId, {
+        title: group.title,
+        color: group.color,
+        collapsed: group.collapsed,
+      });
+      groupRestoredCount += 1;
+    } catch {
+      groupFailedCount += 1;
+    }
+    await emitProgress('groups', restored.size, failedTabs.length, groupRestoredCount + groupFailedCount);
+  }
+
   const activeTab = restored.get(openingTab.index) ?? restored.get(createdOpeningTab?.index);
   if (activeTab?.id) {
     try {
@@ -332,6 +476,7 @@ export async function restoreWorkspace(chromeApi, workspace, { windowId, replace
   }
 
   await removeLandingTab(chromeApi, replaceTabId);
+  await emitProgress('complete', restored.size, failedTabs.length, groupRestoredCount + groupFailedCount);
   return {
     restoredCount: restored.size,
     failedCount: failedTabs.length,
@@ -341,6 +486,9 @@ export async function restoreWorkspace(chromeApi, workspace, { windowId, replace
     skippedUnsupportedCount,
     unsupportedCount: skippedUnsupportedCount,
     pinFailedCount,
+    groupRestoredCount,
+    groupFailedCount,
+    restoredGroups,
     windowId: targetWindowId,
   };
 }

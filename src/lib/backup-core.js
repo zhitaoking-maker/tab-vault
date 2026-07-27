@@ -1,5 +1,5 @@
-export const DATA_VERSION = 1;
-export const EXPORT_SCHEMA_VERSION = 1;
+export const DATA_VERSION = 2;
+export const EXPORT_SCHEMA_VERSION = 2;
 export const STORAGE_QUOTA_BYTES = 10 * 1024 * 1024;
 export const STORAGE_WARNING_RATIO = 0.8;
 export const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -23,6 +23,15 @@ function validTab(tab) {
     && Number.isInteger(tab.index);
 }
 
+function validTabGroup(group) {
+  return isObject(group)
+    && typeof group.title === 'string'
+    && typeof group.color === 'string'
+    && typeof group.collapsed === 'boolean'
+    && Array.isArray(group.tabIndexes)
+    && group.tabIndexes.every(Number.isInteger);
+}
+
 export function validWorkspace(workspace) {
   return isObject(workspace)
     && typeof workspace.id === 'string'
@@ -31,7 +40,9 @@ export function validWorkspace(workspace) {
     && workspace.title.trim().length > 0
     && validDate(workspace.createdAt)
     && Array.isArray(workspace.tabs)
-    && workspace.tabs.every(validTab);
+    && workspace.tabs.every(validTab)
+    && (workspace.groups === undefined
+      || (Array.isArray(workspace.groups) && workspace.groups.every(validTabGroup)));
 }
 
 export function createExportPayload(workspaces, {
@@ -56,7 +67,7 @@ export function parseImportPayload(input) {
   if (!isObject(payload) || !Number.isInteger(payload.schemaVersion) || !Array.isArray(payload.workspaces)) {
     throw new Error('invalid-backup');
   }
-  if (payload.schemaVersion !== EXPORT_SCHEMA_VERSION) throw new Error('unsupported-version');
+  if (![1, EXPORT_SCHEMA_VERSION].includes(payload.schemaVersion)) throw new Error('unsupported-version');
 
   const validWorkspaces = payload.workspaces.filter(validWorkspace).map(clone);
   return {
@@ -81,6 +92,12 @@ function workspaceFingerprint(workspace) {
       pinned: Boolean(tab.pinned),
       active: Boolean(tab.active),
     })),
+    groups: Array.isArray(workspace.groups) ? workspace.groups.map((group) => ({
+      title: group.title,
+      color: group.color,
+      collapsed: Boolean(group.collapsed),
+      tabIndexes: group.tabIndexes,
+    })) : [],
   });
 }
 

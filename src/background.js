@@ -2,10 +2,12 @@ import {
   STORAGE_KEYS,
   deleteWorkspaceTabs,
   getStoredState,
+  normalizeWorkspace,
   renameWorkspace,
   restoreWorkspace,
   saveCurrentWindow,
   setStoredValues,
+  setWorkspacePins,
   sortWorkspaces,
   toggleWorkspacePin,
   undoLastSave,
@@ -64,18 +66,25 @@ function parseBackup(text) {
 }
 
 function normalizeImported(workspaces) {
-  return workspaces.map((workspace) => ({
+  return workspaces.map((workspace) => normalizeWorkspace({
     ...workspace,
-    pinned: Boolean(workspace.pinned),
     lastRestoredAt: workspace.lastRestoredAt ?? null,
-    tabCount: workspace.tabs.length,
-    tabs: workspace.tabs.map((tab) => ({
-      ...tab,
-      favIconUrl: tab.favIconUrl || '',
-      pinned: Boolean(tab.pinned),
-      active: Boolean(tab.active),
-    })),
   }));
+}
+
+function createRestoreProgressReporter(chromeApi, restoreJobId) {
+  if (!restoreJobId || !chromeApi.runtime?.sendMessage) return undefined;
+  return async (progress) => {
+    try {
+      await chromeApi.runtime.sendMessage({
+        type: 'restore-progress',
+        restoreJobId,
+        ...progress,
+      });
+    } catch {
+      // The dashboard can be closed while a restore keeps running.
+    }
+  };
 }
 
 export async function handleMessage(message, chromeApi = chrome) {
@@ -118,6 +127,8 @@ export async function handleMessage(message, chromeApi = chrome) {
       const result = await restoreWorkspace(chromeApi, workspace, {
         tabIndexes: message.tabIndexes,
         windowId: targetWindowId,
+        onProgress: createRestoreProgressReporter(chromeApi, message.restoreJobId),
+        existingGroupIds: message.existingGroupIds,
       });
       if (result.restoredCount === 0) {
         return {
@@ -142,7 +153,7 @@ export async function handleMessage(message, chromeApi = chrome) {
       return {
         exported: true,
         payload: createExportPayload(selected, {
-          extensionVersion: chromeApi.runtime.getManifest?.().version ?? '0.2.0',
+          extensionVersion: chromeApi.runtime.getManifest?.().version ?? '0.3.0',
         }),
       };
     }
@@ -211,6 +222,18 @@ export async function handleMessage(message, chromeApi = chrome) {
       if (!result.ok) return { pinned: false, reason: 'missing' };
       await setStoredValues(chromeApi, { dataVersion: DATA_VERSION, workspaces: result.workspaces });
       return { pinned: true };
+    }
+
+    case 'set-workspaces-pin': {
+      const state = await chromeApi.storage.local.get('workspaces');
+      const result = setWorkspacePins(
+        state.workspaces ?? [],
+        message.workspaceIds,
+        message.pinned,
+      );
+      if (!result.ok) return { pinned: false, reason: 'no-selected-workspaces' };
+      await setStoredValues(chromeApi, { dataVersion: DATA_VERSION, workspaces: result.workspaces });
+      return { pinned: true, updatedCount: result.updatedCount };
     }
 
     case 'delete-workspace': {

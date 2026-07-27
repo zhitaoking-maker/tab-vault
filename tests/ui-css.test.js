@@ -14,3 +14,10 @@ test('v0.2 tool panels and restore reports honor their hidden state', async () =
   assert.match(css, /\.tool-panel\[hidden\]\s*\{[^}]*display:\s*none;?[^}]*\}/s);
   assert.match(css, /\.restore-report\[hidden\]\s*\{[^}]*display:\s*none;?[^}]*\}/s);
 });
+
+test('v0.3 progress and lazy-list controls honor their hidden state', async () => {
+  const css = await readFile(new URL('../ui.css', import.meta.url), 'utf8');
+
+  assert.match(css, /\.restore-progress\[hidden\]\s*\{[^}]*display:\s*none;?[^}]*\}/s);
+  assert.match(css, /\.load-more\[hidden\]\s*\{[^}]*display:\s*none;?[^}]*\}/s);
+});

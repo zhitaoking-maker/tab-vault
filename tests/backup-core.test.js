@@ -41,6 +41,22 @@ test('creates a versioned portable export without unrelated extension settings',
   assert.equal('appearance' in payload, false);
 });
 
+test('imports v0.2 backups and preserves v0.3 tab group snapshots', () => {
+  const item = workspace();
+  const legacy = parseImportPayload({ schemaVersion: 1, workspaces: [item] });
+  const grouped = parseImportPayload({
+    schemaVersion: 2,
+    workspaces: [{
+      ...item,
+      groups: [{ title: '研究', color: 'blue', collapsed: true, tabIndexes: [0] }],
+    }],
+  });
+
+  assert.equal(EXPORT_SCHEMA_VERSION, 2);
+  assert.equal(legacy.validWorkspaces.length, 1);
+  assert.deepEqual(grouped.validWorkspaces[0].groups[0].tabIndexes, [0]);
+});
+
 test('rejects corrupt and future backup formats without returning partial data', () => {
   assert.throws(() => parseImportPayload('{broken'), /invalid-json/);
   assert.throws(() => parseImportPayload(JSON.stringify({ schemaVersion: 99, workspaces: [] })), /unsupported-version/);
@@ -50,7 +66,7 @@ test('rejects corrupt and future backup formats without returning partial data',
 test('previews valid workspaces and counts invalid records', () => {
   const item = workspace();
   const parsed = parseImportPayload(JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: EXPORT_SCHEMA_VERSION,
     exportedAt: '2026-07-26T08:00:00.000Z',
     extensionVersion: '0.2.0',
     workspaces: [item, { id: 'bad', title: 'Broken', tabs: 'nope' }],
@@ -124,7 +140,7 @@ test('prunes trash after 30 days and reports the 10 MB storage warning threshold
     ratio: 0.8,
     warning: true,
   });
-  assert.equal(DATA_VERSION, 1);
+  assert.equal(DATA_VERSION, 2);
 });
 
 test('handles missing trash targets, restore ID collisions, and undefined storage values', () => {

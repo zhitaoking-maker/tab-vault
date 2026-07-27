@@ -4,6 +4,7 @@ export function restoreResultMessage(result, dashboard = false) {
     if (result.failedCount) parts.push(`${result.failedCount} 个失败`);
     if (result.unsupportedCount) parts.push(`${result.unsupportedCount} 个不支持`);
     if (result.pinFailedCount) parts.push(`${result.pinFailedCount} 个固定状态未恢复`);
+    if (result.groupFailedCount) parts.push(`${result.groupFailedCount} 个标签组未完整恢复`);
     return `${parts.join('，')}。`;
   }
   if (result.reason === 'restore-failed') return `${result.failedCount || 0} 个标签恢复失败${dashboard ? '，可以重试' : ''}。`;

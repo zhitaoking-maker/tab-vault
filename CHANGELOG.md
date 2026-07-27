@@ -2,6 +2,22 @@
 
 All notable changes to Tab Vault are documented here.
 
+## [0.3.0] - 2026-07-27
+
+### Added
+
+- Chrome native tab-group snapshots, including group title, color, collapsed state, and membership.
+- Live restore progress for tabs and tab groups, with retryable failed tabs returning to their original restored group.
+- Batch pin and unpin actions for selected workspaces.
+- Bounded dashboard rendering with 40 workspaces per page and an explicit load-more control.
+- A browser-level dashboard test covering desktop behavior and the 390px layout.
+
+### Changed
+
+- Local data and portable backup schemas now use version 2 while remaining able to import v0.2 schema-version-1 backups.
+- Workspace previews now show native tab-group badges and group counts.
+- Restore results now report incomplete tab-group metadata separately.
+
 ## [0.2.0] - 2026-07-26
 
 ### Added

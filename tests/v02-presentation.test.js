@@ -15,7 +15,8 @@ test('describes partial restore failures and metadata loss clearly', () => {
     failedCount: 1,
     unsupportedCount: 2,
     pinFailedCount: 1,
-  }, true), '已恢复 3 个，1 个失败，2 个不支持，1 个固定状态未恢复。');
+    groupFailedCount: 1,
+  }, true), '已恢复 3 个，1 个失败，2 个不支持，1 个固定状态未恢复，1 个标签组未完整恢复。');
   assert.equal(restoreResultMessage({ restored: false, reason: 'restore-failed', failedCount: 2 }, true), '2 个标签恢复失败，可以重试。');
 });
 

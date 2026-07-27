@@ -31,6 +31,8 @@
           <div class="backup-actions">
             <button id="export-all" class="button" type="button">导出全部</button>
             <button id="export-selected" class="button" type="button" disabled>导出已选</button>
+            <button id="pin-selected" class="button" type="button" disabled>置顶已选</button>
+            <button id="unpin-selected" class="button" type="button" disabled>取消置顶</button>
             <button id="trash-selected" class="button button-danger" type="button" disabled>移入回收站</button>
             <label class="button file-button">导入备份
               <input id="import-file" type="file" accept=".json,.tabvault.json,application/json">
@@ -85,6 +87,13 @@
           </div>
         </div>
         <p id="status" class="status" aria-live="polite"></p>
+        <section id="restore-progress" class="restore-progress" hidden aria-live="polite">
+          <div>
+            <span id="restore-progress-text">正在准备恢复…</span>
+            <span id="restore-progress-count"></span>
+          </div>
+          <progress id="restore-progress-meter" max="1" value="0"></progress>
+        </section>
         <section id="restore-report" class="restore-report" hidden>
           <span id="restore-report-text"></span>
           <div>
@@ -93,6 +102,7 @@
           </div>
         </section>
         <div id="workspace-list" class="workspace-list dashboard-list"></div>
+        <button id="load-more" class="button load-more" type="button" hidden></button>
       </section>
     </main>
     <script type="module" src="dashboard.js"></script>

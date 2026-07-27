@@ -41,6 +41,7 @@ export function createWorkspaceRow(workspace, {
   editing = false,
   selectedTabIndexes = new Set(),
   onToggle,
+  restoring = false,
 }) {
   const row = createElement('article', 'workspace-row');
   const main = createElement('div', 'workspace-main');
@@ -95,6 +96,7 @@ export function createWorkspaceRow(workspace, {
     createElement('span', '', formatTime(workspace.createdAt)),
     createElement('span', '', `${workspace.tabCount} 个标签`),
   );
+  if (workspace.groups?.length) metadata.append(createElement('span', '', `${workspace.groups.length} 个标签组`));
   main.append(metadata);
   row.append(main);
 
@@ -108,7 +110,7 @@ export function createWorkspaceRow(workspace, {
   const recoverableCount = workspace.tabs.filter((tab) => tab.restorable).length;
   const restore = createElement('button', 'button button-restore', recoverableCount ? '恢复' : '无法恢复');
   restore.type = 'button';
-  restore.disabled = recoverableCount === 0;
+  restore.disabled = recoverableCount === 0 || restoring;
   if (recoverableCount) restore.addEventListener('click', onRestore);
   const remove = createElement('button', 'button button-danger', '删除');
   remove.type = 'button';
@@ -118,6 +120,10 @@ export function createWorkspaceRow(workspace, {
 
   if (expanded) {
     const list = createElement('ol', 'tab-preview');
+    const groupByTabIndex = new Map();
+    for (const group of workspace.groups ?? []) {
+      for (const tabIndex of group.tabIndexes) groupByTabIndex.set(tabIndex, group);
+    }
     for (const tab of workspace.tabs) {
       const item = createElement('li', tab.restorable ? '' : 'unrestorable');
       if (tab.restorable) {
@@ -136,7 +142,15 @@ export function createWorkspaceRow(workspace, {
         icon.alt = '';
       }
       const text = createElement('div', 'tab-text');
-      text.append(createElement('span', 'tab-title', tab.title));
+      const titleLine = createElement('span', 'tab-title-line');
+      titleLine.append(createElement('span', 'tab-title', tab.title));
+      const group = groupByTabIndex.get(tab.index);
+      if (group) {
+        const badge = createElement('span', 'tab-group-badge', group.title || '未命名组');
+        badge.dataset.color = group.color;
+        titleLine.append(badge);
+      }
+      text.append(titleLine);
       text.append(createElement('span', 'tab-host', tab.restorable ? hostname(tab.url) : '无法恢复的浏览器内部页面'));
       item.append(icon, text);
       list.append(item);
@@ -145,7 +159,7 @@ export function createWorkspaceRow(workspace, {
     const selectedCount = selectedTabIndexes.size;
     const selectedRestore = createElement('button', 'button button-selected-restore', `恢复选中${selectedCount ? ` (${selectedCount})` : ''}`);
     selectedRestore.type = 'button';
-    selectedRestore.disabled = selectedCount === 0;
+    selectedRestore.disabled = selectedCount === 0 || restoring;
     selectedRestore.addEventListener('click', onRestoreSelected);
     const selectedDelete = createElement('button', 'button button-danger', `删除选中${selectedCount ? ` (${selectedCount})` : ''}`);
     selectedDelete.type = 'button';
