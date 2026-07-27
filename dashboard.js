@@ -2,7 +2,13 @@ import { deleteCustomBackground, getCustomBackground, saveCustomBackground, vali
 import { accentInkColor, DEFAULT_ACCENT_COLOR, normalizeAccentColor } from './src/lib/appearance-rules.js';
 import { getUndoPresentation } from './src/lib/undo-presentation.js';
 import { matchesWorkspaceQuery } from './src/lib/workspace-query.js';
-import { createElement, createWorkspaceRow, sendMessage } from './shared-ui.js';
+import {
+  formatStorageUsage,
+  importFailureMessage,
+  importPreviewMessage,
+  restoreResultMessage,
+} from './src/lib/v02-presentation.js';
+import { createElement, createWorkspaceRow, formatTime, sendMessage } from './shared-ui.js';
 
 const APPEARANCE_KEY = 'appearance';
 const list = document.querySelector('#workspace-list');
@@ -12,32 +18,43 @@ const searchInput = document.querySelector('#workspace-search');
 const undoBar = document.querySelector('#undo-bar');
 const undoText = document.querySelector('#undo-text');
 const appearancePanel = document.querySelector('#appearance-panel');
+const backupPanel = document.querySelector('#backup-panel');
+const trashPanel = document.querySelector('#trash-panel');
+const trashList = document.querySelector('#trash-list');
+const trashCount = document.querySelector('#trash-count');
+const emptyTrash = document.querySelector('#empty-trash');
+const storageWarning = document.querySelector('#storage-warning');
+const storageLabel = document.querySelector('#storage-label');
+const storageMeter = document.querySelector('#storage-meter');
+const backupSelectionCount = document.querySelector('#backup-selection-count');
+const exportSelected = document.querySelector('#export-selected');
+const trashSelected = document.querySelector('#trash-selected');
+const importFile = document.querySelector('#import-file');
+const importPreview = document.querySelector('#import-preview');
+const importPreviewText = document.querySelector('#import-preview-text');
+const importConfirm = document.querySelector('#import-confirm');
+const restoreReport = document.querySelector('#restore-report');
+const restoreReportText = document.querySelector('#restore-report-text');
+const retryRestore = document.querySelector('#retry-restore');
 const backgroundFile = document.querySelector('#background-file');
 const backgroundDim = document.querySelector('#background-dim');
 const backgroundRemove = document.querySelector('#background-remove');
 const accentColor = document.querySelector('#accent-color');
-const appearanceClose = document.querySelector('#appearance-close');
-let state = { workspaces: [], undo: null };
+
+let state = { workspaces: [], undo: null, trash: [], storageHealth: null };
 let expandedId = null;
 let editingId = null;
 let query = '';
 let timerId = null;
 let backgroundUrl = null;
+let pendingImportText = null;
+let lastRetry = null;
 let appearance = { enabled: false, dim: 78, accent: DEFAULT_ACCENT_COLOR };
 const selectedTabs = new Map();
+const selectedWorkspaces = new Set();
 
 function setStatus(message) {
   status.textContent = message;
-}
-
-function resultMessage(result) {
-  if (result.restored) {
-    const skipped = result.skippedDuplicateCount ? `，跳过 ${result.skippedDuplicateCount} 个已打开页面。` : '。';
-    return `已在新窗口恢复 ${result.restoredCount} 个标签${skipped}`;
-  }
-  if (result.reason === 'already-open') return `没有新开标签，${result.skippedDuplicateCount} 个页面已在其他窗口打开。`;
-  if (result.reason === 'no-recoverable-tabs') return '这条记录没有可恢复的网页。';
-  return '这个工作区已不存在。';
 }
 
 function selectedFor(workspaceId) {
@@ -45,9 +62,32 @@ function selectedFor(workspaceId) {
   return selectedTabs.get(workspaceId);
 }
 
-async function restore(workspaceId, tabIndexes) {
-  const result = await sendMessage({ type: 'restore-workspace', workspaceId, tabIndexes });
-  setStatus(resultMessage(result));
+function setPanel(panel, open) {
+  for (const candidate of [backupPanel, trashPanel, appearancePanel]) {
+    candidate.hidden = candidate !== panel || !open;
+  }
+  if (!open || panel !== backupPanel) selectedWorkspaces.clear();
+  renderBackupSelection();
+  render();
+}
+
+function showRestoreResult(result, workspaceId) {
+  const message = restoreResultMessage(result, true);
+  setStatus(message);
+  const hasDetails = Boolean(result.failedCount || result.unsupportedCount || result.pinFailedCount);
+  restoreReport.hidden = !hasDetails;
+  restoreReportText.textContent = message;
+  retryRestore.hidden = !result.failedCount;
+  lastRetry = result.failedCount ? {
+    workspaceId,
+    tabIndexes: result.failedTabs.map((tab) => tab.index),
+    windowId: result.windowId,
+  } : null;
+}
+
+async function restore(workspaceId, tabIndexes, windowId) {
+  const result = await sendMessage({ type: 'restore-workspace', workspaceId, tabIndexes, windowId });
+  showRestoreResult(result, workspaceId);
   if (result.restored) selectedTabs.delete(workspaceId);
   await refresh();
 }
@@ -56,7 +96,14 @@ function createRow(workspace) {
   return createWorkspaceRow(workspace, {
     expanded: workspace.id === expandedId,
     editing: workspace.id === editingId,
+    selectable: !backupPanel.hidden,
+    selected: selectedWorkspaces.has(workspace.id),
     selectedTabIndexes: selectedFor(workspace.id),
+    onWorkspaceSelectionChange: (checked) => {
+      if (checked) selectedWorkspaces.add(workspace.id);
+      else selectedWorkspaces.delete(workspace.id);
+      renderBackupSelection();
+    },
     onToggle: () => {
       expandedId = expandedId === workspace.id ? null : workspace.id;
       render();
@@ -81,7 +128,7 @@ function createRow(workspace) {
       }
       selectedTabs.delete(workspace.id);
       if (result.workspaceDeleted) expandedId = null;
-      setStatus(result.workspaceDeleted ? '工作区已删除。' : `已移除 ${result.removedTabCount} 个标签。`);
+      setStatus(result.workspaceDeleted ? '工作区已移入回收站。' : `已移除 ${result.removedTabCount} 个标签。`);
       await refresh();
     },
     onTogglePin: async () => {
@@ -103,11 +150,12 @@ function createRow(workspace) {
       render();
     },
     onDelete: async () => {
-      await sendMessage({ type: 'delete-workspace', workspaceId: workspace.id });
+      const result = await sendMessage({ type: 'delete-workspace', workspaceId: workspace.id });
       selectedTabs.delete(workspace.id);
+      selectedWorkspaces.delete(workspace.id);
       if (expandedId === workspace.id) expandedId = null;
       if (editingId === workspace.id) editingId = null;
-      setStatus('工作区已删除。');
+      setStatus(result.deleted ? '工作区已移入回收站。' : '工作区已不存在。');
       await refresh();
     },
   });
@@ -121,6 +169,58 @@ function appendGroup(label, workspaces) {
   list.append(group);
 }
 
+function renderBackupSelection() {
+  const selectedCount = selectedWorkspaces.size;
+  backupSelectionCount.textContent = selectedCount ? `已选 ${selectedCount} 个工作区` : '未选择工作区';
+  exportSelected.disabled = selectedCount === 0;
+  trashSelected.disabled = selectedCount === 0;
+}
+
+function renderStorageHealth() {
+  if (!state.storageHealth) return;
+  storageLabel.textContent = formatStorageUsage(state.storageHealth);
+  storageMeter.value = Math.min(1, state.storageHealth.ratio);
+  storageMeter.classList.toggle('is-warning', state.storageHealth.warning);
+  storageWarning.hidden = !state.storageHealth.warning;
+}
+
+function renderTrash() {
+  trashList.replaceChildren();
+  trashCount.textContent = state.trash.length ? String(state.trash.length) : '';
+  emptyTrash.disabled = state.trash.length === 0;
+  if (!state.trash.length) {
+    trashList.append(createElement('p', 'empty-state', '回收站为空。'));
+    return;
+  }
+  for (const workspace of state.trash) {
+    const row = createElement('article', 'trash-row');
+    const summary = createElement('div', 'trash-summary');
+    summary.append(
+      createElement('span', 'trash-title', workspace.title),
+      createElement('span', 'trash-meta', `${formatTime(workspace.deletedAt)} · ${workspace.tabCount} 个标签`),
+    );
+    const actions = createElement('div', 'trash-actions');
+    const recover = createElement('button', 'button button-restore', '恢复');
+    recover.type = 'button';
+    recover.addEventListener('click', async () => {
+      const result = await sendMessage({ type: 'restore-trash-workspace', workspaceId: workspace.id });
+      setStatus(result.restored ? '工作区已从回收站恢复。' : '这条记录已不存在。');
+      await refresh();
+    });
+    const remove = createElement('button', 'button button-danger', '永久删除');
+    remove.type = 'button';
+    remove.addEventListener('click', async () => {
+      if (!globalThis.confirm(`永久删除「${workspace.title}」？`)) return;
+      await sendMessage({ type: 'permanently-delete-trash', workspaceId: workspace.id });
+      setStatus('已永久删除。');
+      await refresh();
+    });
+    actions.append(recover, remove);
+    row.append(summary, actions);
+    trashList.append(row);
+  }
+}
+
 function render() {
   list.replaceChildren();
   const visible = state.workspaces.filter((workspace) => matchesWorkspaceQuery(workspace, query));
@@ -132,6 +232,9 @@ function render() {
     appendGroup('时间线', visible.filter((workspace) => !workspace.pinned));
   }
   renderUndo();
+  renderBackupSelection();
+  renderStorageHealth();
+  renderTrash();
 }
 
 function renderUndo() {
@@ -153,6 +256,29 @@ function renderUndo() {
 async function refresh() {
   state = await sendMessage({ type: 'get-state' });
   render();
+}
+
+async function downloadBackup(workspaceIds) {
+  const result = await sendMessage({ type: 'export-workspaces', workspaceIds });
+  if (!result.exported) {
+    setStatus('没有可导出的工作区。');
+    return;
+  }
+  const blob = new Blob([JSON.stringify(result.payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `tab-vault-${new Date().toISOString().slice(0, 10)}.tabvault.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  setStatus(`已导出 ${result.payload.workspaces.length} 个工作区。`);
+}
+
+function clearImportPreview() {
+  pendingImportText = null;
+  importPreview.hidden = true;
+  importPreviewText.textContent = '';
+  importFile.value = '';
 }
 
 async function saveAppearance() {
@@ -191,7 +317,7 @@ async function loadAppearance() {
 
 document.querySelector('#undo-save').addEventListener('click', async () => {
   const result = await sendMessage({ type: 'undo-save' });
-  setStatus(result.undone ? `已恢复 ${result.restoredCount} 个标签。` : '撤销时间已过。');
+  setStatus(result.undone ? restoreResultMessage({ restored: true, ...result }, true) : '撤销时间已过。');
   await refresh();
 });
 
@@ -205,18 +331,92 @@ document.addEventListener('visibilitychange', () => {
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== 'local' || !changes.undo) return;
-  state = { ...state, undo: changes.undo.newValue ?? null };
-  renderUndo();
+  if (areaName !== 'local') return;
+  if (changes.workspaces || changes.trash) {
+    void refresh();
+    return;
+  }
+  if (changes.undo) {
+    state = { ...state, undo: changes.undo.newValue ?? null };
+    renderUndo();
+  }
 });
 
-document.querySelector('#appearance-toggle').addEventListener('click', () => {
-  appearancePanel.hidden = !appearancePanel.hidden;
+document.querySelector('#backup-toggle').addEventListener('click', () => setPanel(backupPanel, backupPanel.hidden));
+document.querySelector('#backup-close').addEventListener('click', () => setPanel(backupPanel, false));
+document.querySelector('#trash-toggle').addEventListener('click', () => setPanel(trashPanel, trashPanel.hidden));
+document.querySelector('#trash-close').addEventListener('click', () => setPanel(trashPanel, false));
+document.querySelector('#appearance-toggle').addEventListener('click', () => setPanel(appearancePanel, appearancePanel.hidden));
+document.querySelector('#appearance-close').addEventListener('click', () => setPanel(appearancePanel, false));
+
+document.querySelector('#export-all').addEventListener('click', () => downloadBackup());
+exportSelected.addEventListener('click', () => downloadBackup([...selectedWorkspaces]));
+
+importFile.addEventListener('change', async () => {
+  const file = importFile.files?.[0];
+  if (!file) return;
+  if (file.size > 20 * 1024 * 1024) {
+    setStatus('备份文件过大，未读取。');
+    clearImportPreview();
+    return;
+  }
+  pendingImportText = await file.text();
+  const preview = await sendMessage({ type: 'preview-import', text: pendingImportText });
+  if (!preview.valid) {
+    setStatus(importFailureMessage(preview.reason));
+    clearImportPreview();
+    return;
+  }
+  importPreviewText.textContent = importPreviewMessage(preview);
+  importPreviewText.textContent += ` 预计占用 ${formatStorageUsage({
+    bytesInUse: preview.estimatedBytesAfterImport,
+    quotaBytes: preview.quotaBytes,
+  })}。`;
+  importConfirm.disabled = preview.importedCount === 0;
+  if (!preview.willFit) {
+    importConfirm.disabled = true;
+    setStatus('导入后会超过本地空间上限。');
+  }
+  importPreview.hidden = false;
 });
 
-appearanceClose.addEventListener('click', () => {
-  appearancePanel.hidden = true;
-  document.querySelector('#appearance-toggle').focus();
+importConfirm.addEventListener('click', async () => {
+  if (!pendingImportText) return;
+  const result = await sendMessage({ type: 'import-workspaces', text: pendingImportText });
+  if (!result.imported) {
+    setStatus(importFailureMessage(result.reason));
+    return;
+  }
+  setStatus(`已导入 ${result.importedCount} 个工作区，跳过 ${result.duplicateCount} 个重复。`);
+  clearImportPreview();
+  selectedWorkspaces.clear();
+  await refresh();
+});
+
+document.querySelector('#import-cancel').addEventListener('click', clearImportPreview);
+
+trashSelected.addEventListener('click', async () => {
+  if (!selectedWorkspaces.size || !globalThis.confirm(`将选中的 ${selectedWorkspaces.size} 个工作区移入回收站？`)) return;
+  const result = await sendMessage({ type: 'delete-workspaces', workspaceIds: [...selectedWorkspaces] });
+  setStatus(result.deleted ? `已将 ${result.deletedCount} 个工作区移入回收站。` : '请先选择工作区。');
+  selectedWorkspaces.clear();
+  await refresh();
+});
+
+emptyTrash.addEventListener('click', async () => {
+  if (!state.trash.length || !globalThis.confirm('永久清空回收站？')) return;
+  await sendMessage({ type: 'empty-trash' });
+  setStatus('回收站已清空。');
+  await refresh();
+});
+
+retryRestore.addEventListener('click', () => {
+  if (lastRetry) void restore(lastRetry.workspaceId, lastRetry.tabIndexes, lastRetry.windowId);
+});
+
+document.querySelector('#dismiss-restore-report').addEventListener('click', () => {
+  restoreReport.hidden = true;
+  lastRetry = null;
 });
 
 backgroundFile.addEventListener('change', async () => {
@@ -237,14 +437,12 @@ backgroundDim.addEventListener('input', () => {
   appearance.dim = Number(backgroundDim.value);
   document.documentElement.style.setProperty('--background-dim', String(appearance.dim / 100));
 });
-
 backgroundDim.addEventListener('change', saveAppearance);
 
 accentColor.addEventListener('input', () => {
   appearance.accent = normalizeAccentColor(accentColor.value);
   applyAccentColor();
 });
-
 accentColor.addEventListener('change', saveAppearance);
 
 backgroundRemove.addEventListener('click', async () => {

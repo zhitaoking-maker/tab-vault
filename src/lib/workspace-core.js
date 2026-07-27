@@ -1,6 +1,16 @@
+import {
+  DATA_VERSION,
+  STORAGE_QUOTA_BYTES,
+  getStorageHealth,
+  measureStorageBytes,
+  pruneTrash,
+} from './backup-core.js';
+
 export const STORAGE_KEYS = {
+  dataVersion: 'dataVersion',
   workspaces: 'workspaces',
   undo: 'undo',
+  trash: 'trash',
 };
 
 const UNDO_DURATION_MS = 10_000;
@@ -16,10 +26,12 @@ export function isRestorableUrl(url) {
 }
 
 export function normalizeWorkspace(workspace) {
+  const tabs = Array.isArray(workspace.tabs) ? workspace.tabs.map(normalizeTab) : [];
   return {
     ...workspace,
     pinned: Boolean(workspace.pinned),
-    tabs: Array.isArray(workspace.tabs) ? workspace.tabs : [],
+    tabCount: tabs.length,
+    tabs,
   };
 }
 
@@ -122,19 +134,44 @@ async function getLocal(chromeApi, keys) {
 }
 
 async function setLocal(chromeApi, values) {
+  const current = await getLocal(chromeApi, null);
+  const next = { ...current, ...values };
+  if (measureStorageBytes(next) > STORAGE_QUOTA_BYTES) throw new Error('storage-full');
   return chromeApi.storage.local.set(values);
 }
 
+export function setStoredValues(chromeApi, values) {
+  return setLocal(chromeApi, values);
+}
+
 export async function getStoredState(chromeApi, now = Date.now()) {
-  const state = await getLocal(chromeApi, [STORAGE_KEYS.workspaces, STORAGE_KEYS.undo]);
+  const state = await getLocal(chromeApi, [
+    STORAGE_KEYS.dataVersion,
+    STORAGE_KEYS.workspaces,
+    STORAGE_KEYS.undo,
+    STORAGE_KEYS.trash,
+  ]);
   const workspaces = Array.isArray(state.workspaces) ? state.workspaces : [];
   const undo = state.undo?.expiresAt > now ? state.undo : null;
+  const originalTrash = Array.isArray(state.trash) ? state.trash : [];
+  const trash = pruneTrash(originalTrash, new Date(now));
 
-  if (state.undo && !undo) await setLocal(chromeApi, { [STORAGE_KEYS.undo]: null });
+  const updates = {};
+  if (state.dataVersion !== DATA_VERSION) updates[STORAGE_KEYS.dataVersion] = DATA_VERSION;
+  if (state.undo && !undo) updates[STORAGE_KEYS.undo] = null;
+  if (trash.length !== originalTrash.length) updates[STORAGE_KEYS.trash] = trash;
+  if (Object.keys(updates).length) await setLocal(chromeApi, updates);
+
+  const bytesInUse = chromeApi.storage.local.getBytesInUse
+    ? await chromeApi.storage.local.getBytesInUse(null)
+    : measureStorageBytes({ ...state, ...updates });
 
   return {
+    dataVersion: DATA_VERSION,
     workspaces: sortWorkspaces(workspaces),
     undo,
+    trash: trash.sort((left, right) => right.deletedAt.localeCompare(left.deletedAt)),
+    storageHealth: getStorageHealth(bytesInUse),
   };
 }
 
@@ -160,10 +197,19 @@ export async function saveCurrentWindow(chromeApi, windowId, { now = new Date(),
     expiresAt: now.getTime() + UNDO_DURATION_MS,
   };
 
-  await setLocal(chromeApi, {
-    [STORAGE_KEYS.workspaces]: [workspace, ...workspaces],
-    [STORAGE_KEYS.undo]: undo,
-  });
+  try {
+    await setLocal(chromeApi, {
+      [STORAGE_KEYS.dataVersion]: DATA_VERSION,
+      [STORAGE_KEYS.workspaces]: [workspace, ...workspaces],
+      [STORAGE_KEYS.undo]: undo,
+    });
+    const stored = await getLocal(chromeApi, STORAGE_KEYS.workspaces);
+    if (!stored.workspaces?.some((item) => item.id === workspace.id)) throw new Error('storage-verification-failed');
+  } catch (error) {
+    if (!existingLanding) await removeLandingTab(chromeApi, landingTab.id);
+    const reason = error.message === 'storage-full' || /quota/i.test(error.message) ? 'storage-full' : 'storage-error';
+    return { saved: false, reason };
+  }
   await chromeApi.tabs.remove(recoverableTabs.map((tab) => tab.id));
 
   return { saved: true, workspace, undo };
@@ -200,50 +246,101 @@ export async function restoreWorkspace(chromeApi, workspace, { windowId, replace
   if (restorableTabs.length === 0) {
     return {
       restoredCount: 0,
+      failedCount: 0,
+      failedTabs: [],
       skippedCount: skippedDuplicateCount + skippedUnsupportedCount,
       skippedDuplicateCount,
       skippedUnsupportedCount,
+      unsupportedCount: skippedUnsupportedCount,
+      pinFailedCount: 0,
     };
   }
 
   let targetWindowId = windowId;
   const restored = new Map();
   const openingTab = restorableTabs.find((tab) => tab.active) ?? restorableTabs[0];
+  let createdOpeningTab = null;
 
   if (targetWindowId) {
-    restored.set(openingTab, await chromeApi.tabs.create({
-      windowId: targetWindowId,
-      url: openingTab.url,
-      index: openingTab.index,
-      active: true,
-    }));
+    createdOpeningTab = openingTab;
   } else {
-    const createdWindow = await chromeApi.windows.create({ url: openingTab.url, focused: true });
-    targetWindowId = createdWindow.id;
-    restored.set(openingTab, createdWindow.tabs?.[0] ?? {
-      id: undefined,
-      windowId: targetWindowId,
-      url: openingTab.url,
-    });
+    const candidates = [openingTab, ...restorableTabs.filter((tab) => tab !== openingTab)];
+    for (const candidate of candidates) {
+      try {
+        const createdWindow = await chromeApi.windows.create({ url: candidate.url, focused: true });
+        targetWindowId = createdWindow.id;
+        createdOpeningTab = candidate;
+        restored.set(candidate.index, createdWindow.tabs?.[0] ?? {
+          id: undefined,
+          windowId: targetWindowId,
+          url: candidate.url,
+        });
+        break;
+      } catch {
+        // Try another URL before reporting the entire restore as failed.
+      }
+    }
+  }
+
+  const failedTabs = [];
+  if (!targetWindowId) {
+    for (const tab of restorableTabs) failedTabs.push({ index: tab.index, url: tab.url, title: tab.title, reason: 'window-create-failed' });
+    return {
+      restoredCount: 0,
+      failedCount: failedTabs.length,
+      failedTabs,
+      skippedCount: skippedUnsupportedCount,
+      skippedDuplicateCount,
+      skippedUnsupportedCount,
+      unsupportedCount: skippedUnsupportedCount,
+      pinFailedCount: 0,
+    };
   }
 
   for (const tab of restorableTabs) {
-    if (tab === openingTab) continue;
-    restored.set(tab, await chromeApi.tabs.create({ windowId: targetWindowId, url: tab.url, index: tab.index, active: false }));
+    if (tab === createdOpeningTab && restored.has(tab.index)) continue;
+    try {
+      restored.set(tab.index, await chromeApi.tabs.create({
+        windowId: targetWindowId,
+        url: tab.url,
+        index: tab.index,
+        active: false,
+      }));
+    } catch (error) {
+      failedTabs.push({ index: tab.index, url: tab.url, title: tab.title, reason: error.message || 'tab-create-failed' });
+    }
   }
 
+  let pinFailedCount = 0;
   for (const tab of restorableTabs) {
-    if (tab.pinned) await chromeApi.tabs.update(restored.get(tab).id, { pinned: true });
+    const restoredTab = restored.get(tab.index);
+    if (!tab.pinned || !restoredTab?.id) continue;
+    try {
+      await chromeApi.tabs.update(restoredTab.id, { pinned: true });
+    } catch {
+      pinFailedCount += 1;
+    }
   }
 
-  await chromeApi.tabs.update(restored.get(openingTab).id, { active: true });
+  const activeTab = restored.get(openingTab.index) ?? restored.get(createdOpeningTab?.index);
+  if (activeTab?.id) {
+    try {
+      await chromeApi.tabs.update(activeTab.id, { active: true });
+    } catch {
+      // The window still contains the restored tabs even if focus changed meanwhile.
+    }
+  }
 
   await removeLandingTab(chromeApi, replaceTabId);
   return {
-    restoredCount: restorableTabs.length,
+    restoredCount: restored.size,
+    failedCount: failedTabs.length,
+    failedTabs,
     skippedCount: skippedDuplicateCount + skippedUnsupportedCount,
     skippedDuplicateCount,
     skippedUnsupportedCount,
+    unsupportedCount: skippedUnsupportedCount,
+    pinFailedCount,
     windowId: targetWindowId,
   };
 }

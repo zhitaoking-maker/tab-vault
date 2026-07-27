@@ -62,11 +62,15 @@ function createChromeMock({ incognitoWindowIds = [] } = {}) {
       storage: {
         local: {
           async get(keys) {
+            if (keys == null) return { ...storage };
             if (typeof keys === 'string') return { [keys]: storage[keys] };
             return Object.fromEntries(keys.map((key) => [key, storage[key]]));
           },
           async set(values) {
             Object.assign(storage, values);
+          },
+          async getBytesInUse() {
+            return new TextEncoder().encode(JSON.stringify(storage)).byteLength;
           },
         },
       },
@@ -140,7 +144,7 @@ test('background message handler reports missing workspaces and undo records', a
   assert.deepEqual(unknown, { error: 'Unknown message type' });
 });
 
-test('background message handler renames, pins, and deletes workspaces', async () => {
+test('background message handler renames, pins, and moves deleted workspaces to trash', async () => {
   const mock = createChromeMock();
   const workspace = buildWorkspace([]);
   mock.storage.workspaces = [workspace];
@@ -159,6 +163,108 @@ test('background message handler renames, pins, and deletes workspaces', async (
   assert.deepEqual(missingPin, { pinned: false, reason: 'missing' });
   assert.deepEqual(deleted, { deleted: true });
   assert.deepEqual(mock.storage.workspaces, []);
+  assert.equal(mock.storage.trash[0].id, workspace.id);
+});
+
+test('background exports, previews, and non-destructively imports workspaces', async () => {
+  const mock = createChromeMock();
+  const workspace = buildWorkspace([{ index: 0, url: 'https://backup.example/', title: 'Backup' }]);
+  mock.storage.workspaces = [workspace];
+
+  const exported = await handleMessage({ type: 'export-workspaces' }, mock.api);
+  const text = JSON.stringify(exported.payload);
+  const preview = await handleMessage({ type: 'preview-import', text }, mock.api);
+  const imported = await handleMessage({ type: 'import-workspaces', text }, mock.api);
+
+  assert.equal(exported.exported, true);
+  assert.equal(exported.payload.schemaVersion, 1);
+  assert.equal(preview.valid, true);
+  assert.equal(preview.workspaceCount, 1);
+  assert.equal(preview.duplicateCount, 1);
+  assert.equal(preview.willFit, true);
+  assert.ok(preview.estimatedBytesAfterImport > 0);
+  assert.equal(imported.imported, true);
+  assert.equal(imported.importedCount, 0);
+  assert.equal(mock.storage.workspaces.length, 1);
+});
+
+test('background batch deletion moves every selected workspace to trash', async () => {
+  const mock = createChromeMock();
+  const first = buildWorkspace([]);
+  const second = buildWorkspace([]);
+  const third = buildWorkspace([]);
+  mock.storage.workspaces = [first, second, third];
+
+  const result = await handleMessage({
+    type: 'delete-workspaces',
+    workspaceIds: [first.id, third.id],
+  }, mock.api);
+
+  assert.equal(result.deleted, true);
+  assert.equal(result.deletedCount, 2);
+  assert.deepEqual(mock.storage.workspaces.map((item) => item.id), [second.id]);
+  assert.deepEqual(new Set(mock.storage.trash.map((item) => item.id)), new Set([first.id, third.id]));
+});
+
+test('background rejects invalid imports, empty exports, and empty batch selections', async () => {
+  const mock = createChromeMock();
+
+  const exported = await handleMessage({ type: 'export-workspaces' }, mock.api);
+  const preview = await handleMessage({ type: 'preview-import', text: '{broken' }, mock.api);
+  const imported = await handleMessage({ type: 'import-workspaces', text: '{broken' }, mock.api);
+  const deleted = await handleMessage({ type: 'delete-workspaces', workspaceIds: [] }, mock.api);
+
+  assert.deepEqual(exported, { exported: false, reason: 'no-workspaces' });
+  assert.deepEqual(preview, { valid: false, reason: 'invalid-json' });
+  assert.deepEqual(imported, { imported: false, reason: 'invalid-json' });
+  assert.deepEqual(deleted, { deleted: false, reason: 'no-selected-workspaces' });
+});
+
+test('background reports missing trash targets and can empty the trash', async () => {
+  const mock = createChromeMock();
+  mock.storage.trash = [];
+
+  const restored = await handleMessage({ type: 'restore-trash-workspace', workspaceId: 'missing' }, mock.api);
+  const removed = await handleMessage({ type: 'permanently-delete-trash', workspaceId: 'missing' }, mock.api);
+  const emptied = await handleMessage({ type: 'empty-trash' }, mock.api);
+
+  assert.deepEqual(restored, { restored: false, reason: 'missing' });
+  assert.deepEqual(removed, { deleted: false, reason: 'missing' });
+  assert.deepEqual(emptied, { deleted: true });
+});
+
+test('deleting every selected tab moves the complete workspace snapshot to trash', async () => {
+  const mock = createChromeMock();
+  const workspace = buildWorkspace([
+    { index: 0, url: 'https://first.example/', title: 'First' },
+    { index: 1, url: 'https://second.example/', title: 'Second' },
+  ]);
+  mock.storage.workspaces = [workspace];
+
+  const result = await handleMessage({
+    type: 'delete-workspace-tabs',
+    workspaceId: workspace.id,
+    tabIndexes: [0, 1],
+  }, mock.api);
+
+  assert.equal(result.workspaceDeleted, true);
+  assert.equal(mock.storage.trash[0].tabs.length, 2);
+});
+
+test('background restores and permanently deletes trash entries', async () => {
+  const mock = createChromeMock();
+  const workspace = buildWorkspace([]);
+  mock.storage.workspaces = [workspace];
+
+  await handleMessage({ type: 'delete-workspace', workspaceId: workspace.id }, mock.api);
+  const restored = await handleMessage({ type: 'restore-trash-workspace', workspaceId: workspace.id }, mock.api);
+  await handleMessage({ type: 'delete-workspace', workspaceId: workspace.id }, mock.api);
+  const removed = await handleMessage({ type: 'permanently-delete-trash', workspaceId: workspace.id }, mock.api);
+
+  assert.equal(restored.restored, true);
+  assert.equal(mock.storage.workspaces.length, 0);
+  assert.equal(removed.deleted, true);
+  assert.deepEqual(mock.storage.trash, []);
 });
 
 test('background message handler deletes only selected workspace tabs', async () => {

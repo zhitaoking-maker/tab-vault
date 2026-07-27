@@ -1,5 +1,6 @@
 import { createElement, createWorkspaceRow, sendMessage } from './shared-ui.js';
 import { getUndoPresentation } from './src/lib/undo-presentation.js';
+import { restoreResultMessage } from './src/lib/v02-presentation.js';
 
 const list = document.querySelector('#workspace-list');
 const status = document.querySelector('#status');
@@ -19,14 +20,9 @@ function setStatus(message) {
 function saveFailureMessage(reason) {
   if (reason === 'incognito-window') return '隐身窗口不会保存到普通工作区。';
   if (reason === 'no-recoverable-tabs') return '当前窗口没有可压缩的网页。';
+  if (reason === 'storage-full') return '本地空间不足，原标签没有关闭。';
+  if (reason === 'storage-error') return '工作区未能安全写入，原标签没有关闭。';
   return '当前窗口没有可保存的标签。';
-}
-
-function resultMessage(result) {
-  if (result.restored) return `已恢复 ${result.restoredCount} 个标签${result.skippedDuplicateCount ? `，跳过 ${result.skippedDuplicateCount} 个已打开页面。` : '。'}`;
-  if (result.reason === 'already-open') return `没有新开标签，${result.skippedDuplicateCount} 个页面已打开。`;
-  if (result.reason === 'no-recoverable-tabs') return '这条记录没有可恢复的网页。';
-  return '这个工作区已不存在。';
 }
 
 function selectedFor(workspaceId) {
@@ -36,7 +32,7 @@ function selectedFor(workspaceId) {
 
 async function restore(workspaceId, tabIndexes) {
   const result = await sendMessage({ type: 'restore-workspace', workspaceId, tabIndexes });
-  setStatus(resultMessage(result));
+  setStatus(restoreResultMessage(result));
   await refresh();
 }
 
@@ -75,7 +71,7 @@ function render() {
           }
           selectedTabs.delete(workspace.id);
           if (result.workspaceDeleted) expandedId = null;
-          setStatus(result.workspaceDeleted ? '工作区已删除。' : `已移除 ${result.removedTabCount} 个标签。`);
+          setStatus(result.workspaceDeleted ? '工作区已移入回收站。' : `已移除 ${result.removedTabCount} 个标签。`);
           await refresh();
         },
         onTogglePin: async () => {
@@ -101,7 +97,7 @@ function render() {
           selectedTabs.delete(workspace.id);
           if (expandedId === workspace.id) expandedId = null;
           if (editingId === workspace.id) editingId = null;
-          setStatus('工作区已删除。');
+          setStatus('工作区已移入回收站。');
           await refresh();
         },
       }));
@@ -148,7 +144,7 @@ document.querySelector('#save-current').addEventListener('click', async () => {
 
 document.querySelector('#undo-save').addEventListener('click', async () => {
   const result = await sendMessage({ type: 'undo-save' });
-  setStatus(result.undone ? `已恢复 ${result.restoredCount} 个标签。` : '撤销时间已过。');
+  setStatus(result.undone ? restoreResultMessage({ restored: true, ...result }) : '撤销时间已过。');
   await refresh();
 });
 

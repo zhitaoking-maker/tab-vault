@@ -34,6 +34,9 @@ export function createWorkspaceRow(workspace, {
   onRename,
   onCancelRename,
   onSelectionChange,
+  selectable = false,
+  selected = false,
+  onWorkspaceSelectionChange,
   expanded = false,
   editing = false,
   selectedTabIndexes = new Set(),
@@ -41,6 +44,15 @@ export function createWorkspaceRow(workspace, {
 }) {
   const row = createElement('article', 'workspace-row');
   const main = createElement('div', 'workspace-main');
+  if (selectable) {
+    const selector = document.createElement('input');
+    selector.type = 'checkbox';
+    selector.className = 'workspace-select';
+    selector.checked = selected;
+    selector.setAttribute('aria-label', `选择工作区 ${workspace.title}`);
+    selector.addEventListener('change', () => onWorkspaceSelectionChange(selector.checked));
+    row.append(selector);
+  }
   if (editing) {
     const input = document.createElement('input');
     input.className = 'workspace-title-input';
