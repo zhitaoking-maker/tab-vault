@@ -2,6 +2,21 @@
 
 All notable changes to Tab Vault are documented here.
 
+## [0.4.0] - 2026-07-27
+
+### Added
+
+- A configurable `Alt + Shift + V` command for compressing the last focused ordinary window.
+- Current Chrome tab-group compression without closing unrelated tabs in the same window.
+- Atomic save-all for ordinary non-incognito windows, with one dashboard landing tab and multi-window undo.
+- Plain URL and Markdown link copying from expanded workspace previews.
+- Browser-level coverage for the new popup actions and clipboard workflow.
+
+### Changed
+
+- The popup keeps current-window compression as the primary action and presents group/all-window saves as compact secondary actions.
+- Combined multi-window snapshots are verified in local storage before any source webpage is closed.
+
 ## [0.3.0] - 2026-07-27
 
 ### Added

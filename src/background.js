@@ -5,7 +5,9 @@ import {
   normalizeWorkspace,
   renameWorkspace,
   restoreWorkspace,
+  saveAllWindows,
   saveCurrentWindow,
+  saveCurrentTabGroup,
   setStoredValues,
   setWorkspacePins,
   sortWorkspaces,
@@ -104,6 +106,26 @@ export async function handleMessage(message, chromeApi = chrome) {
       return result;
     }
 
+    case 'save-current-group': {
+      const targetWindow = Number.isInteger(message.windowId)
+        ? await chromeApi.windows.get(message.windowId)
+        : await chromeApi.windows.getCurrent();
+      if (targetWindow.incognito) return { saved: false, reason: 'incognito-window' };
+      const result = await saveCurrentTabGroup(chromeApi, targetWindow.id, message.groupId, {
+        placeholderUrl: chromeApi.runtime.getURL('dashboard.html'),
+      });
+      if (result.saved) scheduleUndoExpiry(chromeApi, result.undo.expiresAt);
+      return result;
+    }
+
+    case 'save-all-windows': {
+      const result = await saveAllWindows(chromeApi, {
+        placeholderUrl: chromeApi.runtime.getURL('dashboard.html'),
+      });
+      if (result.saved) scheduleUndoExpiry(chromeApi, result.undo.expiresAt);
+      return result;
+    }
+
     case 'undo-save': {
       const result = await undoLastSave(chromeApi);
       if (result.undone || result.reason === 'expired') await clearUndoExpiry(chromeApi);
@@ -153,7 +175,7 @@ export async function handleMessage(message, chromeApi = chrome) {
       return {
         exported: true,
         payload: createExportPayload(selected, {
-          extensionVersion: chromeApi.runtime.getManifest?.().version ?? '0.3.0',
+          extensionVersion: chromeApi.runtime.getManifest?.().version ?? '0.4.0',
         }),
       };
     }
@@ -311,6 +333,12 @@ export async function handleMessage(message, chromeApi = chrome) {
   }
 }
 
+export async function handleCommand(command, chromeApi = chrome) {
+  if (command !== 'save-current-window') return { handled: false };
+  const targetWindow = await chromeApi.windows.getLastFocused({ windowTypes: ['normal'] });
+  return handleMessage({ type: 'save-current', windowId: targetWindow.id }, chromeApi);
+}
+
 if (globalThis.chrome?.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     handleMessage(message)
@@ -323,5 +351,11 @@ if (globalThis.chrome?.runtime?.onMessage) {
 if (globalThis.chrome?.alarms?.onAlarm) {
   chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === UNDO_EXPIRY_ALARM) expireUndo(chrome).catch(() => {});
+  });
+}
+
+if (globalThis.chrome?.commands?.onCommand) {
+  chrome.commands.onCommand.addListener((command) => {
+    handleCommand(command).catch(() => {});
   });
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { expireUndo, handleMessage, scheduleUndoExpiry, UNDO_EXPIRY_ALARM } from '../src/background.js';
+import { expireUndo, handleCommand, handleMessage, scheduleUndoExpiry, UNDO_EXPIRY_ALARM } from '../src/background.js';
 import { buildWorkspace } from '../src/lib/workspace-core.js';
 
 function createChromeMock({ incognitoWindowIds = [] } = {}) {
@@ -25,7 +25,7 @@ function createChromeMock({ incognitoWindowIds = [] } = {}) {
     api: {
       runtime: {
         getURL: (path) => `chrome-extension://tab-vault/${path}`,
-        getManifest: () => ({ version: '0.3.0' }),
+        getManifest: () => ({ version: '0.4.0' }),
         async sendMessage(message) {
           runtimeMessages.push(message);
         },
@@ -40,6 +40,9 @@ function createChromeMock({ incognitoWindowIds = [] } = {}) {
         async getCurrent() {
           getCurrentCalls += 1;
           return { id: 1, incognito: false };
+        },
+        async getLastFocused() {
+          return { id: 2, incognito: false };
         },
         async get(windowId) {
           return { id: windowId, incognito: incognitoWindowIds.includes(windowId) };
@@ -130,6 +133,41 @@ test('save-current keeps a backward-compatible fallback for callers without a wi
   assert.equal(result.saved, true);
   assert.equal(mock.storage.workspaces[0].tabs[0].url, 'https://first.example/');
   assert.equal(mock.getCurrentCalls(), 1);
+});
+
+test('keyboard command compresses the last focused ordinary window', async () => {
+  const mock = createChromeMock();
+
+  const result = await handleCommand('save-current-window', mock.api);
+
+  assert.equal(result.saved, true);
+  assert.equal(mock.storage.workspaces[0].tabs[0].url, 'https://second.example/');
+  assert.deepEqual(await handleCommand('unknown-command', mock.api), { handled: false });
+});
+
+test('background saves the active tab group and all ordinary windows through messages', async () => {
+  const mock = createChromeMock();
+  mock.api.tabs.query = async ({ windowId } = {}) => {
+    if (windowId === 1) {
+      return [
+        { id: 101, windowId: 1, index: 0, url: 'https://group.example/', title: 'Group', active: true, groupId: 7 },
+        { id: 102, windowId: 1, index: 1, url: 'https://outside.example/', title: 'Outside', groupId: -1 },
+      ];
+    }
+    return [{ id: 201, windowId: 2, index: 0, url: 'https://second.example/', title: 'Second', active: true, groupId: -1 }];
+  };
+  mock.api.windows.getAll = async () => [
+    { id: 1, incognito: false, type: 'normal', focused: true, tabs: await mock.api.tabs.query({ windowId: 1 }) },
+    { id: 2, incognito: false, type: 'normal', focused: false, tabs: await mock.api.tabs.query({ windowId: 2 }) },
+  ];
+
+  const group = await handleMessage({ type: 'save-current-group', windowId: 1, groupId: 7 }, mock.api);
+  const all = await handleMessage({ type: 'save-all-windows' }, mock.api);
+
+  assert.equal(group.saved, true);
+  assert.equal(group.workspace.tabCount, 1);
+  assert.equal(all.saved, true);
+  assert.equal(all.workspaceCount, 2);
 });
 
 test('save-current refuses an explicitly targeted incognito window', async () => {

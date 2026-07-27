@@ -154,6 +154,12 @@ try {
         storageHealth: { bytesInUse: 1024 * 700, quotaBytes: 1024 * 1024 * 10, ratio: 0.07, warning: false },
       };
       globalThis.__tabVaultMessages = [];
+      globalThis.__tabVaultClipboard = '';
+      globalThis.confirm = () => true;
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { async writeText(text) { globalThis.__tabVaultClipboard = text; } },
+      });
       globalThis.chrome = {
         runtime: {
           onMessage: { addListener(listener) { runtimeListeners.push(listener); } },
@@ -179,8 +185,18 @@ try {
               }));
               return { restored: true, restoredCount: 2, failedCount: 0, unsupportedCount: 0, pinFailedCount: 0, groupFailedCount: 0 };
             }
+            if (message.type === 'save-current-group') {
+              return { saved: true, workspace: { tabCount: 2 } };
+            }
+            if (message.type === 'save-all-windows') {
+              return { saved: true, workspaceCount: 2, tabCount: 4 };
+            }
             return { deleted: true, renamed: true, exported: false };
           },
+        },
+        tabs: {
+          async query() { return [{ id: 501, windowId: 1, groupId: 7, active: true }]; },
+          async create() {},
         },
         storage: {
           local: {
@@ -212,6 +228,8 @@ try {
   await evaluate("document.querySelector('.workspace-title').click()");
   await waitFor(() => evaluate("Boolean(document.querySelector('.tab-group-badge'))"), 'tab group badge');
   assert.equal(await evaluate("document.querySelector('.tab-group-badge').textContent"), '研究');
+  await evaluate("document.querySelector('.button-copy-markdown').click()");
+  await waitFor(() => evaluate("globalThis.__tabVaultClipboard.includes('- [资料 0]')"), 'Markdown clipboard copy');
 
   await evaluate("document.querySelector('#load-more').click()");
   await waitFor(() => evaluate("document.querySelectorAll('.workspace-row').length === 80"), 'second lazy list page');
@@ -232,7 +250,17 @@ try {
 
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
   assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true);
-  console.log('Dashboard browser test passed: lazy rendering, groups, progress, batch pinning, and 390px layout.');
+
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 430, height: 760, deviceScaleFactor: 1, mobile: false });
+  await cdp.send('Page.navigate', { url: `http://127.0.0.1:${webPort}/popup.html` });
+  await waitFor(() => evaluate("Boolean(document.querySelector('#save-current-group'))"), 'popup advanced actions');
+  assert.equal(await evaluate("document.querySelector('#save-current-group').disabled"), false);
+  await evaluate("document.querySelector('#save-current-group').click()");
+  await waitFor(() => evaluate("globalThis.__tabVaultMessages.some((message) => message.type === 'save-current-group' && message.groupId === 7)"), 'group save action');
+  await evaluate("document.querySelector('#save-all-windows').click()");
+  await waitFor(() => evaluate("globalThis.__tabVaultMessages.some((message) => message.type === 'save-all-windows')"), 'all-window save action');
+  assert.equal(await evaluate('document.documentElement.scrollWidth <= window.innerWidth'), true);
+  console.log('Browser UI test passed: dashboard workflows, popup advanced saves, clipboard copy, and narrow layouts.');
 } finally {
   cdp?.close();
   if (browser && !browser.killed) {

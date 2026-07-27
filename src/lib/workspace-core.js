@@ -215,6 +215,25 @@ export function setStoredValues(chromeApi, values) {
   return setLocal(chromeApi, values);
 }
 
+async function persistWorkspaceSnapshots(chromeApi, snapshots, undo) {
+  const previous = await getLocal(chromeApi, [STORAGE_KEYS.workspaces]);
+  const workspaces = Array.isArray(previous.workspaces) ? previous.workspaces : [];
+  await setLocal(chromeApi, {
+    [STORAGE_KEYS.dataVersion]: DATA_VERSION,
+    [STORAGE_KEYS.workspaces]: [...snapshots, ...workspaces],
+    [STORAGE_KEYS.undo]: undo,
+  });
+  const stored = await getLocal(chromeApi, STORAGE_KEYS.workspaces);
+  const storedIds = new Set(stored.workspaces?.map((workspace) => workspace.id));
+  if (!snapshots.every((workspace) => storedIds.has(workspace.id))) {
+    throw new Error('storage-verification-failed');
+  }
+}
+
+function storageFailureReason(error) {
+  return error.message === 'storage-full' || /quota/i.test(error.message) ? 'storage-full' : 'storage-error';
+}
+
 export async function getStoredState(chromeApi, now = Date.now()) {
   const state = await getLocal(chromeApi, [
     STORAGE_KEYS.dataVersion,
@@ -255,8 +274,6 @@ export async function saveCurrentWindow(chromeApi, windowId, { now = new Date(),
 
   const groups = await captureTabGroups(chromeApi, recoverableTabs);
   const workspace = buildWorkspace(recoverableTabs, now, groups);
-  const previous = await getLocal(chromeApi, [STORAGE_KEYS.workspaces]);
-  const workspaces = Array.isArray(previous.workspaces) ? previous.workspaces : [];
   const existingLanding = tabs.find((tab) => tab.url === placeholderUrl);
   const landingTab = existingLanding
     ? await chromeApi.tabs.update(existingLanding.id, { url: placeholderUrl, active: true })
@@ -270,21 +287,127 @@ export async function saveCurrentWindow(chromeApi, windowId, { now = new Date(),
   };
 
   try {
-    await setLocal(chromeApi, {
-      [STORAGE_KEYS.dataVersion]: DATA_VERSION,
-      [STORAGE_KEYS.workspaces]: [workspace, ...workspaces],
-      [STORAGE_KEYS.undo]: undo,
-    });
-    const stored = await getLocal(chromeApi, STORAGE_KEYS.workspaces);
-    if (!stored.workspaces?.some((item) => item.id === workspace.id)) throw new Error('storage-verification-failed');
+    await persistWorkspaceSnapshots(chromeApi, [workspace], undo);
   } catch (error) {
     if (!existingLanding) await removeLandingTab(chromeApi, landingTab.id);
-    const reason = error.message === 'storage-full' || /quota/i.test(error.message) ? 'storage-full' : 'storage-error';
-    return { saved: false, reason };
+    return { saved: false, reason: storageFailureReason(error) };
   }
   await chromeApi.tabs.remove(recoverableTabs.map((tab) => tab.id));
 
   return { saved: true, workspace, undo };
+}
+
+export async function saveCurrentTabGroup(chromeApi, windowId, groupId, {
+  now = new Date(),
+  placeholderUrl = PLACEHOLDER_URL,
+} = {}) {
+  if (!Number.isInteger(groupId) || groupId < 0) return { saved: false, reason: 'missing-tab-group' };
+  const tabs = await chromeApi.tabs.query({ windowId });
+  const groupedTabs = tabs.filter((tab) => tab.groupId === groupId);
+  if (!groupedTabs.length) return { saved: false, reason: 'missing-tab-group' };
+  const recoverableTabs = groupedTabs.filter((tab) => isRestorableUrl(tab.url));
+  if (!recoverableTabs.length) return { saved: false, reason: 'no-recoverable-tabs' };
+
+  const groups = await captureTabGroups(chromeApi, recoverableTabs);
+  const workspace = buildWorkspace(recoverableTabs, now, groups);
+  if (groups[0]?.title) workspace.title = groups[0].title.slice(0, 60);
+
+  const recoverableIds = new Set(recoverableTabs.map((tab) => tab.id));
+  const remainingTabs = tabs.filter((tab) => !recoverableIds.has(tab.id));
+  const existingLanding = tabs.find((tab) => tab.url === placeholderUrl);
+  let landingTab = existingLanding ?? null;
+  let createdLanding = false;
+  if (!remainingTabs.length) {
+    landingTab = existingLanding
+      ? await chromeApi.tabs.update(existingLanding.id, { url: placeholderUrl, active: true })
+      : await chromeApi.tabs.create({ windowId, url: placeholderUrl, active: true });
+    createdLanding = !existingLanding;
+  }
+  const undo = {
+    workspaceId: workspace.id,
+    workspace,
+    windowId,
+    placeholderTabId: landingTab?.id ?? null,
+    expiresAt: now.getTime() + UNDO_DURATION_MS,
+  };
+
+  try {
+    await persistWorkspaceSnapshots(chromeApi, [workspace], undo);
+  } catch (error) {
+    if (createdLanding) await removeLandingTab(chromeApi, landingTab.id);
+    return { saved: false, reason: storageFailureReason(error) };
+  }
+  await chromeApi.tabs.remove(recoverableTabs.map((tab) => tab.id));
+  return { saved: true, workspace, undo };
+}
+
+export async function saveAllWindows(chromeApi, {
+  now = new Date(),
+  placeholderUrl = PLACEHOLDER_URL,
+} = {}) {
+  const allWindows = await chromeApi.windows.getAll({ populate: true, windowTypes: ['normal'] });
+  const ordinaryWindows = allWindows.filter((window) => window.type === 'normal' && !window.incognito);
+  const candidates = ordinaryWindows
+    .map((window) => ({
+      window,
+      tabs: Array.isArray(window.tabs) ? window.tabs : [],
+    }))
+    .map((entry) => ({
+      ...entry,
+      recoverableTabs: entry.tabs.filter((tab) => isRestorableUrl(tab.url)),
+    }))
+    .filter((entry) => entry.recoverableTabs.length);
+  if (!candidates.length) return { saved: false, reason: 'no-recoverable-tabs' };
+
+  const snapshots = [];
+  for (const candidate of candidates) {
+    const groups = await captureTabGroups(chromeApi, candidate.recoverableTabs);
+    snapshots.push({
+      windowId: candidate.window.id,
+      tabs: candidate.tabs,
+      recoverableTabs: candidate.recoverableTabs,
+      workspace: buildWorkspace(candidate.recoverableTabs, now, groups),
+    });
+  }
+
+  let lastFocused;
+  try {
+    lastFocused = await chromeApi.windows.getLastFocused();
+  } catch {
+    lastFocused = null;
+  }
+  const landingSnapshot = snapshots.find((snapshot) => snapshot.windowId === lastFocused?.id) ?? snapshots[0];
+  const existingLanding = landingSnapshot.tabs.find((tab) => tab.url === placeholderUrl);
+  const landingTab = existingLanding
+    ? await chromeApi.tabs.update(existingLanding.id, { url: placeholderUrl, active: true })
+    : await chromeApi.tabs.create({ windowId: landingSnapshot.windowId, url: placeholderUrl, active: true });
+  const undo = {
+    workspaceId: snapshots[0].workspace.id,
+    workspace: snapshots[0].workspace,
+    entries: snapshots.map((snapshot) => ({
+      windowId: snapshot.windowId,
+      placeholderTabId: snapshot === landingSnapshot ? landingTab.id : null,
+      workspace: snapshot.workspace,
+    })),
+    expiresAt: now.getTime() + UNDO_DURATION_MS,
+  };
+
+  try {
+    await persistWorkspaceSnapshots(chromeApi, snapshots.map((snapshot) => snapshot.workspace), undo);
+  } catch (error) {
+    if (!existingLanding) await removeLandingTab(chromeApi, landingTab.id);
+    return { saved: false, reason: storageFailureReason(error) };
+  }
+
+  const tabIds = snapshots.flatMap((snapshot) => snapshot.recoverableTabs.map((tab) => tab.id));
+  await chromeApi.tabs.remove(tabIds);
+  return {
+    saved: true,
+    workspaces: snapshots.map((snapshot) => snapshot.workspace),
+    workspaceCount: snapshots.length,
+    tabCount: tabIds.length,
+    undo,
+  };
 }
 
 async function removeLandingTab(chromeApi, tabId) {
@@ -496,10 +619,50 @@ export async function restoreWorkspace(chromeApi, workspace, {
 export async function undoLastSave(chromeApi, now = Date.now()) {
   const state = await getLocal(chromeApi, STORAGE_KEYS.undo);
   const undo = state.undo;
-  if (!undo || !undo.workspace) return { undone: false, reason: 'missing' };
+  if (!undo || (!undo.workspace && !undo.entries?.length)) return { undone: false, reason: 'missing' };
   if (undo.expiresAt <= now) {
     await setLocal(chromeApi, { [STORAGE_KEYS.undo]: null });
     return { undone: false, reason: 'expired' };
+  }
+
+  if (Array.isArray(undo.entries) && undo.entries.length) {
+    const aggregate = {
+      restoredCount: 0,
+      failedCount: 0,
+      failedTabs: [],
+      skippedCount: 0,
+      skippedDuplicateCount: 0,
+      skippedUnsupportedCount: 0,
+      unsupportedCount: 0,
+      pinFailedCount: 0,
+      groupRestoredCount: 0,
+      groupFailedCount: 0,
+      restoredGroups: [],
+    };
+    for (const entry of undo.entries) {
+      let targetWindowId;
+      if (Number.isInteger(entry.windowId)) {
+        try {
+          await chromeApi.windows.get(entry.windowId);
+          targetWindowId = entry.windowId;
+        } catch {
+          targetWindowId = undefined;
+        }
+      }
+      const restored = await restoreWorkspace(chromeApi, entry.workspace, {
+        windowId: targetWindowId,
+        replaceTabId: entry.placeholderTabId,
+      });
+      for (const key of [
+        'restoredCount', 'failedCount', 'skippedCount', 'skippedDuplicateCount',
+        'skippedUnsupportedCount', 'unsupportedCount', 'pinFailedCount',
+        'groupRestoredCount', 'groupFailedCount',
+      ]) aggregate[key] += restored[key] ?? 0;
+      aggregate.failedTabs.push(...(restored.failedTabs ?? []));
+      aggregate.restoredGroups.push(...(restored.restoredGroups ?? []));
+    }
+    await setLocal(chromeApi, { [STORAGE_KEYS.undo]: null });
+    return { undone: true, ...aggregate };
   }
 
   const restored = await restoreWorkspace(chromeApi, undo.workspace, {

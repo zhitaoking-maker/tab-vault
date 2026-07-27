@@ -1,17 +1,22 @@
-import { createElement, createWorkspaceRow, sendMessage } from './shared-ui.js';
+import { copyText, createElement, createWorkspaceRow, sendMessage } from './shared-ui.js';
 import { getUndoPresentation } from './src/lib/undo-presentation.js';
 import { restoreResultMessage } from './src/lib/v02-presentation.js';
+import { formatWorkspaceClipboard } from './src/lib/v04-presentation.js';
 
 const list = document.querySelector('#workspace-list');
 const status = document.querySelector('#status');
 const undoBar = document.querySelector('#undo-bar');
 const undoText = document.querySelector('#undo-text');
 const count = document.querySelector('#workspace-count');
+const saveCurrent = document.querySelector('#save-current');
+const saveCurrentGroup = document.querySelector('#save-current-group');
+const saveAllWindows = document.querySelector('#save-all-windows');
 let state = { workspaces: [], undo: null };
 let expandedId = null;
 let editingId = null;
 let timerId = null;
 const selectedTabs = new Map();
+let activeContext = null;
 
 function setStatus(message) {
   status.textContent = message;
@@ -22,7 +27,22 @@ function saveFailureMessage(reason) {
   if (reason === 'no-recoverable-tabs') return '当前窗口没有可压缩的网页。';
   if (reason === 'storage-full') return '本地空间不足，原标签没有关闭。';
   if (reason === 'storage-error') return '工作区未能安全写入，原标签没有关闭。';
+  if (reason === 'missing-tab-group') return '当前标签不在标签组中。';
   return '当前窗口没有可保存的标签。';
+}
+
+async function refreshActiveContext() {
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  activeContext = activeTab ?? null;
+  saveCurrentGroup.disabled = !Number.isInteger(activeTab?.groupId) || activeTab.groupId < 0;
+}
+
+async function copyWorkspace(workspace, format) {
+  const text = formatWorkspaceClipboard(workspace, format);
+  const copied = await copyText(text);
+  setStatus(copied
+    ? `已复制${format === 'markdown' ? ' Markdown' : '链接'}。`
+    : '没有可复制的网页链接。');
 }
 
 function selectedFor(workspaceId) {
@@ -100,6 +120,8 @@ function render() {
           setStatus('工作区已移入回收站。');
           await refresh();
         },
+        onCopyLinks: () => copyWorkspace(workspace, 'plain'),
+        onCopyMarkdown: () => copyWorkspace(workspace, 'markdown'),
       }));
     }
   }
@@ -127,18 +149,52 @@ async function refresh() {
   render();
 }
 
-document.querySelector('#save-current').addEventListener('click', async () => {
-  const button = document.querySelector('#save-current');
+saveCurrent.addEventListener('click', async () => {
+  const button = saveCurrent;
   button.disabled = true;
   try {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    const result = await sendMessage({ type: 'save-current', windowId: activeTab?.windowId });
+    if (!activeContext) await refreshActiveContext();
+    const result = await sendMessage({ type: 'save-current', windowId: activeContext?.windowId });
     setStatus(result.saved ? `已保存 ${result.workspace.tabCount} 个标签，已打开总览。` : saveFailureMessage(result.reason));
     await refresh();
   } catch {
     setStatus('保存失败，请再试一次。');
   } finally {
     button.disabled = false;
+  }
+});
+
+saveCurrentGroup.addEventListener('click', async () => {
+  saveCurrentGroup.disabled = true;
+  try {
+    if (!activeContext) await refreshActiveContext();
+    const result = await sendMessage({
+      type: 'save-current-group',
+      windowId: activeContext?.windowId,
+      groupId: activeContext?.groupId,
+    });
+    setStatus(result.saved ? `已压缩标签组中的 ${result.workspace.tabCount} 个网页。` : saveFailureMessage(result.reason));
+    await refresh();
+  } catch {
+    setStatus('标签组保存失败，请再试一次。');
+  } finally {
+    await refreshActiveContext().catch(() => {});
+  }
+});
+
+saveAllWindows.addEventListener('click', async () => {
+  if (!globalThis.confirm('保存并关闭全部普通窗口中的网页？隐身窗口不会处理。')) return;
+  saveAllWindows.disabled = true;
+  try {
+    const result = await sendMessage({ type: 'save-all-windows' });
+    setStatus(result.saved
+      ? `已保存 ${result.workspaceCount} 个窗口，共 ${result.tabCount} 个标签。`
+      : saveFailureMessage(result.reason));
+    await refresh();
+  } catch {
+    setStatus('全部窗口保存失败，原标签会尽量保持不变。');
+  } finally {
+    saveAllWindows.disabled = false;
   }
 });
 
@@ -158,4 +214,4 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   renderUndo();
 });
 
-refresh();
+Promise.all([refresh(), refreshActiveContext()]);

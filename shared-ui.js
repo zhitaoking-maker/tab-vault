@@ -24,6 +24,25 @@ export function createElement(tag, className, text) {
   return element;
 }
 
+export async function copyText(text) {
+  if (!text) return false;
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.append(textarea);
+    textarea.select();
+    const copied = document.execCommand('copy');
+    textarea.remove();
+    return copied;
+  }
+}
+
 export function createWorkspaceRow(workspace, {
   onRestore,
   onRestoreSelected,
@@ -42,6 +61,8 @@ export function createWorkspaceRow(workspace, {
   selectedTabIndexes = new Set(),
   onToggle,
   restoring = false,
+  onCopyLinks,
+  onCopyMarkdown,
 }) {
   const row = createElement('article', 'workspace-row');
   const main = createElement('div', 'workspace-main');
@@ -166,6 +187,18 @@ export function createWorkspaceRow(workspace, {
     selectedDelete.disabled = selectedCount === 0;
     selectedDelete.addEventListener('click', onDeleteSelected);
     const previewActions = createElement('div', 'preview-actions');
+    if (onCopyLinks) {
+      const copyLinks = createElement('button', 'button button-copy-links', '复制链接');
+      copyLinks.type = 'button';
+      copyLinks.addEventListener('click', onCopyLinks);
+      previewActions.append(copyLinks);
+    }
+    if (onCopyMarkdown) {
+      const copyMarkdown = createElement('button', 'button button-copy-markdown', '复制 Markdown');
+      copyMarkdown.type = 'button';
+      copyMarkdown.addEventListener('click', onCopyMarkdown);
+      previewActions.append(copyMarkdown);
+    }
     previewActions.append(selectedRestore, selectedDelete);
     row.append(previewActions);
   }

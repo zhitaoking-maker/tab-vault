@@ -92,6 +92,9 @@ h2 { margin-bottom: 0; font-size: 13px; font-weight: 500; }
 
 .save-button:hover { background: color-mix(in srgb, var(--accent) 86%, white); }
 .save-button:disabled { cursor: wait; opacity: 0.65; }
+.save-secondary-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 8px; }
+.save-secondary-actions .button { min-height: 31px; color: var(--muted); }
+.shortcut-hint { margin: 7px 0 0; color: color-mix(in srgb, var(--muted) 76%, transparent); font-size: 9px; }
 
 .undo-bar {
   justify-content: space-between;
@@ -221,6 +224,7 @@ h2 { margin-bottom: 0; font-size: 13px; font-weight: 500; }
 .empty-state { margin: 15px 0; color: var(--muted); font-size: 12px; }
 .preview-actions { display: flex; justify-content: flex-end; gap: 6px; width: 100%; margin-top: 9px; }
 .button-selected-restore { color: var(--accent); }
+.button-copy-links, .button-copy-markdown { color: var(--muted); }
 
 .dashboard-body {
   min-height: 100vh;
