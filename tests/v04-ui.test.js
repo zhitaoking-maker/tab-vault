@@ -10,3 +10,12 @@ test('popup exposes group, all-window, and shortcut controls without replacing t
   assert.match(html, /id="save-all-windows"[^>]*>保存全部窗口/);
   assert.match(html, /Alt \+ Shift \+ V/);
 });
+
+test('workspace preview presents a readable default copy action and compact format menu', async () => {
+  const source = await readFile(new URL('../shared-ui.js', import.meta.url), 'utf8');
+
+  assert.match(source, /复制网页清单/);
+  assert.match(source, /仅 URL/);
+  assert.match(source, /Markdown/);
+  assert.doesNotMatch(source, /'复制链接'/);
+});

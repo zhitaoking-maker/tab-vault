@@ -61,7 +61,8 @@ export function createWorkspaceRow(workspace, {
   selectedTabIndexes = new Set(),
   onToggle,
   restoring = false,
-  onCopyLinks,
+  onCopyList,
+  onCopyUrls,
   onCopyMarkdown,
 }) {
   const row = createElement('article', 'workspace-row');
@@ -187,17 +188,35 @@ export function createWorkspaceRow(workspace, {
     selectedDelete.disabled = selectedCount === 0;
     selectedDelete.addEventListener('click', onDeleteSelected);
     const previewActions = createElement('div', 'preview-actions');
-    if (onCopyLinks) {
-      const copyLinks = createElement('button', 'button button-copy-links', '复制链接');
-      copyLinks.type = 'button';
-      copyLinks.addEventListener('click', onCopyLinks);
-      previewActions.append(copyLinks);
-    }
-    if (onCopyMarkdown) {
-      const copyMarkdown = createElement('button', 'button button-copy-markdown', '复制 Markdown');
-      copyMarkdown.type = 'button';
-      copyMarkdown.addEventListener('click', onCopyMarkdown);
-      previewActions.append(copyMarkdown);
+    if (onCopyList) {
+      const copyControl = createElement('div', 'copy-control');
+      const copyList = createElement('button', 'button button-copy-list', '复制网页清单');
+      copyList.type = 'button';
+      copyList.addEventListener('click', onCopyList);
+      copyControl.append(copyList);
+      if (onCopyUrls || onCopyMarkdown) {
+        const formatMenu = createElement('details', 'copy-format-menu');
+        const formatToggle = createElement('summary', 'button copy-format-toggle', '▾');
+        formatToggle.setAttribute('aria-label', '更多复制格式');
+        formatToggle.title = '更多复制格式';
+        const formatOptions = createElement('div', 'copy-format-options');
+        const addFormatOption = (label, format, handler) => {
+          if (!handler) return;
+          const option = createElement('button', '', label);
+          option.type = 'button';
+          option.dataset.format = format;
+          option.addEventListener('click', () => {
+            formatMenu.open = false;
+            handler();
+          });
+          formatOptions.append(option);
+        };
+        addFormatOption('仅 URL', 'urls', onCopyUrls);
+        addFormatOption('Markdown', 'markdown', onCopyMarkdown);
+        formatMenu.append(formatToggle, formatOptions);
+        copyControl.append(formatMenu);
+      }
+      previewActions.append(copyControl);
     }
     previewActions.append(selectedRestore, selectedDelete);
     row.append(previewActions);

@@ -9,7 +9,7 @@ All notable changes to Tab Vault are documented here.
 - A configurable `Alt + Shift + V` command for compressing the last focused ordinary window.
 - Current Chrome tab-group compression without closing unrelated tabs in the same window.
 - Atomic save-all for ordinary non-incognito windows, with one dashboard landing tab and multi-window undo.
-- Plain URL and Markdown link copying from expanded workspace previews.
+- Readable title-and-URL lists as the primary copy action, with plain URL and Markdown formats in a compact menu.
 - Browser-level coverage for the new popup actions and clipboard workflow.
 
 ### Changed

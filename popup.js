@@ -1,7 +1,7 @@
 import { copyText, createElement, createWorkspaceRow, sendMessage } from './shared-ui.js';
 import { getUndoPresentation } from './src/lib/undo-presentation.js';
 import { restoreResultMessage } from './src/lib/v02-presentation.js';
-import { formatWorkspaceClipboard } from './src/lib/v04-presentation.js';
+import { clipboardSuccessMessage, formatWorkspaceClipboard } from './src/lib/v04-presentation.js';
 
 const list = document.querySelector('#workspace-list');
 const status = document.querySelector('#status');
@@ -40,9 +40,8 @@ async function refreshActiveContext() {
 async function copyWorkspace(workspace, format) {
   const text = formatWorkspaceClipboard(workspace, format);
   const copied = await copyText(text);
-  setStatus(copied
-    ? `已复制${format === 'markdown' ? ' Markdown' : '链接'}。`
-    : '没有可复制的网页链接。');
+  const count = workspace.tabs.filter((tab) => tab.restorable && typeof tab.url === 'string').length;
+  setStatus(copied ? clipboardSuccessMessage(format, count) : '这个工作区没有可复制的网页。');
 }
 
 function selectedFor(workspaceId) {
@@ -120,7 +119,8 @@ function render() {
           setStatus('工作区已移入回收站。');
           await refresh();
         },
-        onCopyLinks: () => copyWorkspace(workspace, 'plain'),
+        onCopyList: () => copyWorkspace(workspace, 'list'),
+        onCopyUrls: () => copyWorkspace(workspace, 'urls'),
         onCopyMarkdown: () => copyWorkspace(workspace, 'markdown'),
       }));
     }

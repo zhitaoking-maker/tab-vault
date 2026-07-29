@@ -228,8 +228,11 @@ try {
   await evaluate("document.querySelector('.workspace-title').click()");
   await waitFor(() => evaluate("Boolean(document.querySelector('.tab-group-badge'))"), 'tab group badge');
   assert.equal(await evaluate("document.querySelector('.tab-group-badge').textContent"), '研究');
-  await evaluate("document.querySelector('.button-copy-markdown').click()");
+  await evaluate("document.querySelector('.button-copy-list').click()");
+  await waitFor(() => evaluate("globalThis.__tabVaultClipboard.includes('研究现场\\n\\n1. 资料 0\\n   https://example.com/0')"), 'readable clipboard copy');
+  await evaluate("document.querySelector('.copy-format-menu').open = true; document.querySelector('[data-format=\"markdown\"]').click()");
   await waitFor(() => evaluate("globalThis.__tabVaultClipboard.includes('- [资料 0]')"), 'Markdown clipboard copy');
+  assert.equal(await evaluate("document.querySelector('.copy-format-menu').open"), false);
 
   await evaluate("document.querySelector('#load-more').click()");
   await waitFor(() => evaluate("document.querySelectorAll('.workspace-row').length === 80"), 'second lazy list page');

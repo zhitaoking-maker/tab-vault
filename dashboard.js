@@ -13,7 +13,7 @@ import {
   getWorkspaceRenderSlice,
   restoreProgressMessage,
 } from './src/lib/v03-presentation.js';
-import { formatWorkspaceClipboard } from './src/lib/v04-presentation.js';
+import { clipboardSuccessMessage, formatWorkspaceClipboard } from './src/lib/v04-presentation.js';
 import { copyText, createElement, createWorkspaceRow, formatTime, sendMessage } from './shared-ui.js';
 
 const APPEARANCE_KEY = 'appearance';
@@ -132,9 +132,8 @@ async function restore(workspaceId, tabIndexes, windowId, existingGroupIds) {
 
 async function copyWorkspace(workspace, format) {
   const copied = await copyText(formatWorkspaceClipboard(workspace, format));
-  setStatus(copied
-    ? `已复制${format === 'markdown' ? ' Markdown' : '链接'}。`
-    : '没有可复制的网页链接。');
+  const count = workspace.tabs.filter((tab) => tab.restorable && typeof tab.url === 'string').length;
+  setStatus(copied ? clipboardSuccessMessage(format, count) : '这个工作区没有可复制的网页。');
 }
 
 function createRow(workspace) {
@@ -204,7 +203,8 @@ function createRow(workspace) {
       setStatus(result.deleted ? '工作区已移入回收站。' : '工作区已不存在。');
       await refresh();
     },
-    onCopyLinks: () => copyWorkspace(workspace, 'plain'),
+    onCopyList: () => copyWorkspace(workspace, 'list'),
+    onCopyUrls: () => copyWorkspace(workspace, 'urls'),
     onCopyMarkdown: () => copyWorkspace(workspace, 'markdown'),
   });
 }
