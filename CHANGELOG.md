@@ -2,6 +2,22 @@
 
 All notable changes to Tab Vault are documented here.
 
+## [0.5.0] - 2026-09-10
+
+### Added
+
+- Workspace archiving workflow: mark inactive workspaces as archived and browse/restore them from a collapsible drawer, solving the infinite timeline issue.
+- Prompt Vault core and dashboard board: category filtering, real-time keyword search, creation/editing, and standalone versioned JSON export/import.
+- One-click text copying with lightweight toast visual feedback across both Dashboard and Popup views.
+- Seamless hash routing (`#prompts`) allowing direct navigation from popup to prompt board.
+- Dual-view compact popup supporting quick prompt search and copy alongside active workspace restoration.
+
+### Changed
+
+- Cleaned all colorful emoji icons from navigation tabs, returning to pure minimalist typographic hierarchy.
+- Decoupled appearance panel and synchronized header drawer panels (backup/trash) with prompt view state.
+- Upgraded version baseline to 0.5.0 with full automated test suite coverage (107 tests passing).
+
 ## [0.4.0] - 2026-07-27
 
 ### Added
