@@ -41,3 +41,11 @@
 - Implemented: backup and trash actions now return from prompts to workspaces before opening their panels.
 - Verification complete: focused Dashboard tests passed 5/5, full `npm test` passed 107/107, and `npm run test:dashboard` passed.
 - Ready for commit: only the repair whitelist files changed; no BLOCKED.md is required.
+
+## Dashboard Text Tab Cleanup
+
+- Baseline complete: `npm test` passed 107/107 on the existing hash-routing fix.
+- Implemented: Dashboard navigation tabs are pure text; prompt-view Header now uses the concise 「提示词」 label.
+- Retained: existing Hash routing, Header panel synchronization, and compliant muted/accent 2px tab indicator styling without unrelated CSS churn.
+- Verification complete: Dashboard-focused tests passed 5/5, full `npm test` passed 107/107, and browser regression passed.
+- Ready for commit: only the cleanup whitelist files changed; no BLOCKED.md is required.

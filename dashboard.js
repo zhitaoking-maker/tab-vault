@@ -131,7 +131,7 @@ function setActiveView(view) {
   workspaceTab.setAttribute('aria-selected', String(!showingPrompts));
   promptTab.classList.toggle('is-active', showingPrompts);
   promptTab.setAttribute('aria-selected', String(showingPrompts));
-  dashboardTitle.textContent = showingPrompts ? '提示词看板' : '工作区';
+  dashboardTitle.textContent = showingPrompts ? '提示词' : '工作区';
   dashboardSubtitle.textContent = showingPrompts
     ? '这里放着你常用的提示词与思考资产。'
     : '这里放着你暂时离开的网页现场。';

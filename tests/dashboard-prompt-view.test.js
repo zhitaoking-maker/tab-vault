@@ -51,7 +51,10 @@ test('dashboard routes prompt links by hash and keeps header copy synchronized w
   assert.match(source, /window\.location\.hash === '#prompts' \? 'prompts' : 'workspaces'/);
   assert.match(source, /window\.addEventListener\('hashchange', syncViewWithHash\)/);
   assert.match(source, /history\.replaceState\(null, '', view === 'prompts' \? '#prompts' : '#workspaces'\)/);
-  assert.match(source, /showingPrompts \? '提示词看板' : '工作区'/);
+  assert.match(html, /id="workspace-tab"[^>]*>工作区<\/button>/);
+  assert.match(html, /id="prompt-tab"[^>]*>提示词<\/button>/);
+  assert.doesNotMatch(html, /📁|⚡/);
+  assert.match(source, /showingPrompts \? '提示词' : '工作区'/);
 });
 
 test('workspace header panels return from prompts before opening backup or trash', async () => {
