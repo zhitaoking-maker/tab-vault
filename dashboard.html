@@ -21,7 +21,11 @@
           <button id="appearance-toggle" class="icon-command" type="button">外观</button>
         </div>
       </header>
-      <section class="timeline-board">
+      <nav class="dashboard-tabs" aria-label="Dashboard 视图">
+        <button id="workspace-tab" class="dashboard-tab is-active" type="button" role="tab" aria-selected="true">📁 工作区</button>
+        <button id="prompt-tab" class="dashboard-tab" type="button" role="tab" aria-selected="false">⚡ 提示词看板</button>
+      </nav>
+      <section id="workspace-view" class="timeline-board" role="tabpanel" aria-labelledby="workspace-tab">
         <section id="backup-panel" class="tool-panel backup-panel" hidden>
           <button id="backup-close" class="tool-panel-close" type="button" aria-label="关闭备份面板">×</button>
           <div class="tool-panel-heading">
@@ -103,8 +107,63 @@
         </section>
         <div id="workspace-list" class="workspace-list dashboard-list"></div>
         <button id="load-more" class="button load-more" type="button" hidden></button>
+        <details id="archive-drawer" class="archive-drawer">
+          <summary>已归档工作区 <span id="archived-count">(0)</span></summary>
+          <div id="archived-list" class="archived-list"></div>
+        </details>
+      </section>
+      <section id="prompt-board" class="prompt-board" role="tabpanel" aria-labelledby="prompt-tab" hidden>
+        <div class="prompt-board-heading">
+          <div>
+            <p class="eyebrow">PROMPT VAULT</p>
+            <h2>提示词看板</h2>
+          </div>
+          <button id="new-prompt" class="button button-restore" type="button">+ 新建提示词</button>
+        </div>
+        <div class="prompt-toolbar">
+          <div id="prompt-categories" class="prompt-categories" aria-label="提示词分类">
+            <button class="category-pill is-active" type="button" data-category="all">全部</button>
+            <button class="category-pill" type="button" data-category="通用">通用</button>
+            <button class="category-pill" type="button" data-category="代码">代码</button>
+            <button class="category-pill" type="button" data-category="写作">写作</button>
+          </div>
+          <label class="prompt-search">搜索提示词
+            <input id="prompt-search" type="search" placeholder="标题或正文">
+          </label>
+          <div class="prompt-file-actions">
+            <button id="export-prompts" class="button" type="button">备份提示词</button>
+            <label class="button file-button">导入提示词
+              <input id="import-prompts" type="file" accept="application/json,.json">
+            </label>
+          </div>
+        </div>
+        <p id="prompt-status" class="status" aria-live="polite"></p>
+        <div id="prompt-list" class="prompt-list"></div>
       </section>
     </main>
+    <dialog id="prompt-dialog" class="prompt-dialog" aria-labelledby="prompt-dialog-title">
+      <form id="prompt-form" method="dialog">
+        <div class="prompt-dialog-heading">
+          <h2 id="prompt-dialog-title">新建提示词</h2>
+          <button id="prompt-dialog-close" class="report-close" type="button" aria-label="关闭提示词编辑器">×</button>
+        </div>
+        <label>标题
+          <input id="prompt-title" name="title" maxlength="100" required>
+        </label>
+        <label>分类
+          <input id="prompt-category" name="category" list="prompt-category-options" maxlength="40" required>
+          <datalist id="prompt-category-options"><option value="通用"></option><option value="代码"></option><option value="写作"></option></datalist>
+        </label>
+        <label>正文
+          <textarea id="prompt-content" name="content" rows="9" required></textarea>
+        </label>
+        <div class="prompt-dialog-actions">
+          <button id="prompt-cancel" class="button" type="button">取消</button>
+          <button class="button button-restore" type="submit">保存提示词</button>
+        </div>
+      </form>
+    </dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script type="module" src="dashboard.js"></script>
   </body>
 </html>

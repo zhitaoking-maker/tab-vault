@@ -12,3 +12,14 @@
 - Final gate: full suite must be at least 100 passing tests; only allowlisted files may differ.
 - Final gate complete: full `npm test` passed 100/100 with zero fail, cancelled, skipped, or todo tests.
 - Maximum risk: undefined prompt-import shape could create an incompatible storage contract; use explicit version and failure results.
+
+## Phase 2 Dashboard Archive Drawer and Prompt Board
+
+- Step 0 complete: on `feature/v0.5.0-prompt-vault` with a clean worktree; baseline `npm test` passed 100/100.
+- Scope: add Dashboard-only archive controls and a local prompt board using existing `prompt-core.js`, without touching workspace backups.
+- Implementation order: inspect the Dashboard render/event model, add UI markup and styles, connect data flow, then add focused tests and commit.
+- Maximum risk: Dashboard has several legacy delegated actions; new controls must coexist without changing backup or restore message flows.
+- Step 1 and 2 implemented: active-only timeline, collapsed archive drawer, and independent prompt board data flow are wired into Dashboard.
+- Browser regression complete: `npm run test:dashboard` passed after normalizing legacy status records at the Dashboard boundary.
+- Step 3 complete: added `dashboard-prompt-view.test.js`; full `npm test` passed 103/103 with zero fail, cancelled, skipped, or todo tests.
+- Ready for commit: only the Phase 2 whitelist files are changed; no deferred decisions require BLOCKED.md.

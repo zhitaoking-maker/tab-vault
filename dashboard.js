@@ -14,6 +14,15 @@ import {
   restoreProgressMessage,
 } from './src/lib/v03-presentation.js';
 import { clipboardSuccessMessage, formatWorkspaceClipboard } from './src/lib/v04-presentation.js';
+import { archiveWorkspace, unarchiveWorkspace } from './src/lib/workspace-core.js';
+import {
+  createPrompt,
+  deletePrompt,
+  exportPromptsPayload,
+  filterPrompts,
+  importPromptsPayload,
+  updatePrompt,
+} from './src/lib/prompt-core.js';
 import { copyText, createElement, createWorkspaceRow, formatTime, sendMessage } from './shared-ui.js';
 
 const APPEARANCE_KEY = 'appearance';
@@ -53,6 +62,25 @@ const backgroundFile = document.querySelector('#background-file');
 const backgroundDim = document.querySelector('#background-dim');
 const backgroundRemove = document.querySelector('#background-remove');
 const accentColor = document.querySelector('#accent-color');
+const workspaceView = document.querySelector('#workspace-view');
+const promptBoard = document.querySelector('#prompt-board');
+const workspaceTab = document.querySelector('#workspace-tab');
+const promptTab = document.querySelector('#prompt-tab');
+const archiveDrawer = document.querySelector('#archive-drawer');
+const archivedCount = document.querySelector('#archived-count');
+const archivedList = document.querySelector('#archived-list');
+const promptList = document.querySelector('#prompt-list');
+const promptSearch = document.querySelector('#prompt-search');
+const promptStatus = document.querySelector('#prompt-status');
+const promptCategories = document.querySelector('#prompt-categories');
+const importPrompts = document.querySelector('#import-prompts');
+const promptDialog = document.querySelector('#prompt-dialog');
+const promptForm = document.querySelector('#prompt-form');
+const promptDialogTitle = document.querySelector('#prompt-dialog-title');
+const promptTitle = document.querySelector('#prompt-title');
+const promptCategory = document.querySelector('#prompt-category');
+const promptContent = document.querySelector('#prompt-content');
+const toast = document.querySelector('#toast');
 
 let state = { workspaces: [], undo: null, trash: [], storageHealth: null };
 let expandedId = null;
@@ -66,11 +94,42 @@ let activeRestoreJob = null;
 let currentRestoreProgress = null;
 let renderLimit = DEFAULT_WORKSPACE_RENDER_LIMIT;
 let appearance = { enabled: false, dim: 78, accent: DEFAULT_ACCENT_COLOR };
+let prompts = [];
+let activeView = 'workspaces';
+let activePromptCategory = 'all';
+let promptQuery = '';
+let editingPromptId = null;
+let toastTimerId = null;
 const selectedTabs = new Map();
 const selectedWorkspaces = new Set();
 
 function setStatus(message) {
   status.textContent = message;
+}
+
+function setPromptStatus(message) {
+  promptStatus.textContent = message;
+}
+
+function showToast(message) {
+  clearTimeout(toastTimerId);
+  toast.textContent = message;
+  toast.hidden = false;
+  toastTimerId = setTimeout(() => {
+    toast.hidden = true;
+  }, 1200);
+}
+
+function setActiveView(view) {
+  activeView = view;
+  const showingPrompts = view === 'prompts';
+  workspaceView.hidden = showingPrompts;
+  promptBoard.hidden = !showingPrompts;
+  workspaceTab.classList.toggle('is-active', !showingPrompts);
+  workspaceTab.setAttribute('aria-selected', String(!showingPrompts));
+  promptTab.classList.toggle('is-active', showingPrompts);
+  promptTab.setAttribute('aria-selected', String(showingPrompts));
+  if (showingPrompts) renderPromptBoard();
 }
 
 function selectedFor(workspaceId) {
@@ -137,7 +196,7 @@ async function copyWorkspace(workspace, format) {
 }
 
 function createRow(workspace) {
-  return createWorkspaceRow(workspace, {
+  const row = createWorkspaceRow(workspace, {
     expanded: workspace.id === expandedId,
     editing: workspace.id === editingId,
     selectable: !backupPanel.hidden,
@@ -207,6 +266,40 @@ function createRow(workspace) {
     onCopyUrls: () => copyWorkspace(workspace, 'urls'),
     onCopyMarkdown: () => copyWorkspace(workspace, 'markdown'),
   });
+  const archive = createElement('button', 'button button-archive', '归档 📦');
+  archive.type = 'button';
+  archive.addEventListener('click', () => archiveWorkspaceById(workspace.id));
+  row.querySelector('.workspace-controls').append(archive);
+  return row;
+}
+
+async function updateArchivedWorkspace(workspaceId, operation) {
+  const stored = await chrome.storage.local.get('workspaces');
+  const workspaces = Array.isArray(stored.workspaces) ? stored.workspaces : [];
+  const updated = operation(workspaces, workspaceId);
+  if (updated === workspaces) return false;
+  await chrome.storage.local.set({ workspaces: updated });
+  return true;
+}
+
+async function archiveWorkspaceById(workspaceId) {
+  const updated = await updateArchivedWorkspace(workspaceId, archiveWorkspace);
+  if (!updated) {
+    setStatus('工作区已不存在。');
+    return;
+  }
+  selectedTabs.delete(workspaceId);
+  selectedWorkspaces.delete(workspaceId);
+  if (expandedId === workspaceId) expandedId = null;
+  if (editingId === workspaceId) editingId = null;
+  setStatus('工作区已归档。');
+  await refresh();
+}
+
+async function unarchiveWorkspaceById(workspaceId) {
+  const updated = await updateArchivedWorkspace(workspaceId, unarchiveWorkspace);
+  setStatus(updated ? '工作区已恢复为活跃状态。' : '工作区已不存在。');
+  await refresh();
 }
 
 function appendGroup(label, workspaces) {
@@ -282,11 +375,35 @@ function renderTrash() {
   }
 }
 
+function renderArchiveDrawer(archivedWorkspaces) {
+  archivedCount.textContent = `(${archivedWorkspaces.length})`;
+  archivedList.replaceChildren();
+  if (!archivedWorkspaces.length) {
+    archivedList.append(createElement('p', 'empty-state', '还没有归档的工作区。'));
+    return;
+  }
+  for (const workspace of archivedWorkspaces) {
+    const row = createElement('article', 'archived-row');
+    const summary = createElement('div', 'archived-summary');
+    summary.append(
+      createElement('span', 'archived-title', workspace.title),
+      createElement('span', 'archived-meta', `${workspace.tabCount} 个标签 · ${formatTime(workspace.archivedAt || workspace.createdAt)}`),
+    );
+    const restore = createElement('button', 'button button-restore', '恢复活跃 ↩');
+    restore.type = 'button';
+    restore.addEventListener('click', () => unarchiveWorkspaceById(workspace.id));
+    row.append(summary, restore);
+    archivedList.append(row);
+  }
+}
+
 function render() {
   list.replaceChildren();
-  const visible = state.workspaces.filter((workspace) => matchesWorkspaceQuery(workspace, query));
+  const activeWorkspaces = state.workspaces.filter((workspace) => workspace.status === 'active');
+  const archivedWorkspaces = state.workspaces.filter((workspace) => workspace.status === 'archived');
+  const visible = activeWorkspaces.filter((workspace) => matchesWorkspaceQuery(workspace, query));
   const page = getWorkspaceRenderSlice(visible, renderLimit);
-  count.textContent = query ? `${visible.length} / ${state.workspaces.length} 条记录` : `${state.workspaces.length} 条记录`;
+  count.textContent = query ? `${visible.length} / ${activeWorkspaces.length} 条活跃记录` : `${activeWorkspaces.length} 条活跃记录`;
   if (visible.length === 0) {
     list.append(createElement('p', 'empty-state', query ? '没有匹配的工作区。' : '还没有存下任何工作区。'));
   } else {
@@ -295,11 +412,99 @@ function render() {
   }
   loadMore.hidden = !page.hasMore;
   loadMore.textContent = page.hasMore ? `再显示 ${Math.min(DEFAULT_WORKSPACE_RENDER_LIMIT, page.remainingCount)} 条` : '';
+  renderArchiveDrawer(archivedWorkspaces);
   renderUndo();
   renderBackupSelection();
   renderStorageHealth();
   renderTrash();
   renderRestoreProgress();
+}
+
+function createPromptCard(prompt) {
+  const card = createElement('article', 'prompt-card');
+  const heading = createElement('div', 'prompt-card-heading');
+  heading.append(
+    createElement('h3', 'prompt-title', prompt.title),
+    createElement('span', 'prompt-category-badge', prompt.category),
+  );
+  const content = createElement('p', 'prompt-content', prompt.content);
+  const meta = createElement('span', 'prompt-meta', `更新于 ${formatTime(prompt.updatedAt)}`);
+  const actions = createElement('div', 'prompt-actions');
+  const copy = createElement('button', 'button button-restore', '📋 复制');
+  copy.type = 'button';
+  copy.addEventListener('click', () => copyPrompt(prompt));
+  const edit = createElement('button', 'button', '✏️ 编辑');
+  edit.type = 'button';
+  edit.addEventListener('click', () => openPromptDialog(prompt));
+  const remove = createElement('button', 'button button-danger', '🗑️ 删除');
+  remove.type = 'button';
+  remove.addEventListener('click', () => deletePromptById(prompt.id));
+  actions.append(copy, edit, remove);
+  card.append(heading, content, meta, actions);
+  return card;
+}
+
+function renderPromptBoard() {
+  for (const button of promptCategories.querySelectorAll('.category-pill')) {
+    button.classList.toggle('is-active', button.dataset.category === activePromptCategory);
+  }
+  promptList.replaceChildren();
+  const visiblePrompts = filterPrompts(prompts, { category: activePromptCategory, query: promptQuery });
+  if (!visiblePrompts.length) {
+    const message = prompts.length ? '没有匹配的提示词。' : '还没有提示词。新建一条，开始积累自己的提示词库。';
+    promptList.append(createElement('p', 'empty-state', message));
+    return;
+  }
+  for (const prompt of visiblePrompts) promptList.append(createPromptCard(prompt));
+}
+
+async function refreshPrompts() {
+  const stored = await chrome.storage.local.get('prompts');
+  prompts = Array.isArray(stored.prompts) ? stored.prompts : [];
+  renderPromptBoard();
+}
+
+async function persistPrompts(nextPrompts) {
+  prompts = nextPrompts;
+  await chrome.storage.local.set({ prompts });
+  renderPromptBoard();
+}
+
+async function copyPrompt(prompt) {
+  try {
+    await navigator.clipboard.writeText(prompt.content);
+    showToast('已复制到剪贴板');
+  } catch {
+    setPromptStatus('无法访问剪贴板，请检查浏览器权限。');
+  }
+}
+
+function openPromptDialog(prompt = null) {
+  editingPromptId = prompt?.id ?? null;
+  promptDialogTitle.textContent = prompt ? '编辑提示词' : '新建提示词';
+  promptTitle.value = prompt?.title ?? '';
+  promptCategory.value = prompt?.category ?? '通用';
+  promptContent.value = prompt?.content ?? '';
+  promptDialog.showModal();
+  promptTitle.focus();
+}
+
+async function deletePromptById(promptId) {
+  const prompt = prompts.find((item) => item.id === promptId);
+  if (!prompt || !globalThis.confirm(`删除提示词「${prompt.title}」？`)) return;
+  await persistPrompts(deletePrompt(prompts, promptId));
+  setPromptStatus('提示词已删除。');
+}
+
+function downloadPrompts() {
+  const blob = new Blob([exportPromptsPayload(prompts)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `tab-vault-prompts-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  setPromptStatus(`已备份 ${prompts.length} 条提示词。`);
 }
 
 function renderUndo() {
@@ -319,7 +524,15 @@ function renderUndo() {
 }
 
 async function refresh() {
-  state = await sendMessage({ type: 'get-state' });
+  const nextState = await sendMessage({ type: 'get-state' });
+  state = {
+    ...nextState,
+    workspaces: (Array.isArray(nextState.workspaces) ? nextState.workspaces : []).map((workspace) => ({
+      ...workspace,
+      status: workspace.status === 'archived' ? 'archived' : 'active',
+      archivedAt: workspace.archivedAt || null,
+    })),
+  };
   render();
 }
 
@@ -417,7 +630,14 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     state = { ...state, undo: changes.undo.newValue ?? null };
     renderUndo();
   }
+  if (changes.prompts) {
+    prompts = Array.isArray(changes.prompts.newValue) ? changes.prompts.newValue : [];
+    renderPromptBoard();
+  }
 });
+
+workspaceTab.addEventListener('click', () => setActiveView('workspaces'));
+promptTab.addEventListener('click', () => setActiveView('prompts'));
 
 document.querySelector('#backup-toggle').addEventListener('click', () => setPanel(backupPanel, backupPanel.hidden));
 document.querySelector('#backup-close').addEventListener('click', () => setPanel(backupPanel, false));
@@ -553,4 +773,55 @@ backgroundRemove.addEventListener('click', async () => {
   setStatus('已移除自定义背景。');
 });
 
-Promise.all([refresh(), loadAppearance()]);
+promptCategories.addEventListener('click', (event) => {
+  const button = event.target.closest('.category-pill');
+  if (!button) return;
+  activePromptCategory = button.dataset.category;
+  renderPromptBoard();
+});
+
+promptSearch.addEventListener('input', () => {
+  promptQuery = promptSearch.value;
+  renderPromptBoard();
+});
+
+document.querySelector('#new-prompt').addEventListener('click', () => openPromptDialog());
+document.querySelector('#export-prompts').addEventListener('click', downloadPrompts);
+document.querySelector('#prompt-dialog-close').addEventListener('click', () => promptDialog.close());
+document.querySelector('#prompt-cancel').addEventListener('click', () => promptDialog.close());
+
+promptForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const fields = {
+    title: promptTitle.value,
+    category: promptCategory.value,
+    content: promptContent.value,
+  };
+  const nextPrompts = editingPromptId
+    ? updatePrompt(prompts, editingPromptId, fields)
+    : createPrompt(prompts, fields);
+  if (nextPrompts === prompts) {
+    setPromptStatus('标题、分类和正文都不能为空。');
+    return;
+  }
+  await persistPrompts(nextPrompts);
+  promptDialog.close();
+  setPromptStatus(editingPromptId ? '提示词已更新。' : '提示词已新建。');
+  editingPromptId = null;
+});
+
+importPrompts.addEventListener('change', async () => {
+  const file = importPrompts.files?.[0];
+  if (!file) return;
+  const result = importPromptsPayload(prompts, await file.text(), { mode: 'merge' });
+  importPrompts.value = '';
+  if (!result.ok) {
+    setPromptStatus('提示词导入失败：文件格式无效。');
+    return;
+  }
+  const addedCount = result.prompts.length - prompts.length;
+  await persistPrompts(result.prompts);
+  setPromptStatus(`已导入 ${addedCount} 条提示词，重复内容已跳过。`);
+});
+
+Promise.all([refresh(), refreshPrompts(), loadAppearance()]);
