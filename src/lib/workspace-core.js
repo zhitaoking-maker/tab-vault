@@ -9,6 +9,7 @@ import {
 export const STORAGE_KEYS = {
   dataVersion: 'dataVersion',
   workspaces: 'workspaces',
+  prompts: 'prompts',
   undo: 'undo',
   trash: 'trash',
 };
@@ -32,11 +33,42 @@ export function normalizeWorkspace(workspace) {
   const groups = normalizeTabGroups(workspace.groups, tabIndexes);
   return {
     ...workspace,
+    status: workspace.status === 'archived' ? 'archived' : 'active',
+    archivedAt: workspace.archivedAt || null,
     pinned: Boolean(workspace.pinned),
     tabCount: tabs.length,
     tabs,
     groups,
   };
+}
+
+export function archiveWorkspace(workspaces, workspaceId) {
+  let found = false;
+  const archivedAt = new Date().toISOString();
+  const updated = workspaces.map((workspace) => {
+    if (workspace.id !== workspaceId) return workspace;
+    found = true;
+    return {
+      ...normalizeWorkspace(workspace),
+      status: 'archived',
+      archivedAt,
+    };
+  });
+  return found ? updated : workspaces;
+}
+
+export function unarchiveWorkspace(workspaces, workspaceId) {
+  let found = false;
+  const updated = workspaces.map((workspace) => {
+    if (workspace.id !== workspaceId) return workspace;
+    found = true;
+    return {
+      ...normalizeWorkspace(workspace),
+      status: 'active',
+      archivedAt: null,
+    };
+  });
+  return found ? updated : workspaces;
 }
 
 export function sortWorkspaces(workspaces) {
