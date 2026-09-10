@@ -33,3 +33,11 @@
 - Step 1 and 2 implemented: Popup tabs preserve the save workflow, hide archived sessions, and add prompt-only search, copy, and Dashboard handoff.
 - Step 3 complete: added `popup-prompt-view.test.js`; full `npm test` passed 105/105 and browser regression passed with zero deferred decisions.
 - Ready for commit: only the Phase 3 whitelist files are changed; no BLOCKED.md is required.
+
+## Dashboard Hash and Header Sync Fix
+
+- Baseline complete: `npm test` passed 105/105 on the phase branch with a clean worktree.
+- Implemented: Hash-driven Dashboard view selection, Header copy synchronization, and public appearance controls.
+- Implemented: backup and trash actions now return from prompts to workspaces before opening their panels.
+- Verification complete: focused Dashboard tests passed 5/5, full `npm test` passed 107/107, and `npm run test:dashboard` passed.
+- Ready for commit: only the repair whitelist files changed; no BLOCKED.md is required.

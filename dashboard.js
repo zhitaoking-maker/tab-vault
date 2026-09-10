@@ -66,6 +66,8 @@ const workspaceView = document.querySelector('#workspace-view');
 const promptBoard = document.querySelector('#prompt-board');
 const workspaceTab = document.querySelector('#workspace-tab');
 const promptTab = document.querySelector('#prompt-tab');
+const dashboardTitle = document.querySelector('#dashboard-title');
+const dashboardSubtitle = document.querySelector('#dashboard-subtitle');
 const archiveDrawer = document.querySelector('#archive-drawer');
 const archivedCount = document.querySelector('#archived-count');
 const archivedList = document.querySelector('#archived-list');
@@ -129,7 +131,20 @@ function setActiveView(view) {
   workspaceTab.setAttribute('aria-selected', String(!showingPrompts));
   promptTab.classList.toggle('is-active', showingPrompts);
   promptTab.setAttribute('aria-selected', String(showingPrompts));
+  dashboardTitle.textContent = showingPrompts ? '提示词看板' : '工作区';
+  dashboardSubtitle.textContent = showingPrompts
+    ? '这里放着你常用的提示词与思考资产。'
+    : '这里放着你暂时离开的网页现场。';
   if (showingPrompts) renderPromptBoard();
+}
+
+function syncViewWithHash() {
+  setActiveView(window.location.hash === '#prompts' ? 'prompts' : 'workspaces');
+}
+
+function selectView(view) {
+  history.replaceState(null, '', view === 'prompts' ? '#prompts' : '#workspaces');
+  setActiveView(view);
 }
 
 function selectedFor(workspaceId) {
@@ -636,12 +651,18 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 });
 
-workspaceTab.addEventListener('click', () => setActiveView('workspaces'));
-promptTab.addEventListener('click', () => setActiveView('prompts'));
+workspaceTab.addEventListener('click', () => selectView('workspaces'));
+promptTab.addEventListener('click', () => selectView('prompts'));
+window.addEventListener('hashchange', syncViewWithHash);
 
-document.querySelector('#backup-toggle').addEventListener('click', () => setPanel(backupPanel, backupPanel.hidden));
+function openWorkspacePanel(panel) {
+  if (activeView === 'prompts') selectView('workspaces');
+  setPanel(panel, panel.hidden);
+}
+
+document.querySelector('#backup-toggle').addEventListener('click', () => openWorkspacePanel(backupPanel));
 document.querySelector('#backup-close').addEventListener('click', () => setPanel(backupPanel, false));
-document.querySelector('#trash-toggle').addEventListener('click', () => setPanel(trashPanel, trashPanel.hidden));
+document.querySelector('#trash-toggle').addEventListener('click', () => openWorkspacePanel(trashPanel));
 document.querySelector('#trash-close').addEventListener('click', () => setPanel(trashPanel, false));
 document.querySelector('#appearance-toggle').addEventListener('click', () => setPanel(appearancePanel, appearancePanel.hidden));
 document.querySelector('#appearance-close').addEventListener('click', () => setPanel(appearancePanel, false));
@@ -824,4 +845,5 @@ importPrompts.addEventListener('change', async () => {
   setPromptStatus(`已导入 ${addedCount} 条提示词，重复内容已跳过。`);
 });
 
+syncViewWithHash();
 Promise.all([refresh(), refreshPrompts(), loadAppearance()]);

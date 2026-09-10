@@ -39,3 +39,29 @@ test('prompt board passes category and text query through the shared prompt filt
   assert.match(source, /promptSearch\.addEventListener\('input'/);
   assert.match(source, /promptCategories\.addEventListener\('click'/);
 });
+
+test('dashboard routes prompt links by hash and keeps header copy synchronized with the active view', async () => {
+  const [html, source] = await Promise.all([
+    readFile(new URL('../dashboard.html', import.meta.url), 'utf8'),
+    readFile(new URL('../dashboard.js', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(html, /<h1 id="dashboard-title">工作区<\/h1>/);
+  assert.match(html, /<p id="dashboard-subtitle" class="subtitle">这里放着你暂时离开的网页现场。<\/p>/);
+  assert.match(source, /window\.location\.hash === '#prompts' \? 'prompts' : 'workspaces'/);
+  assert.match(source, /window\.addEventListener\('hashchange', syncViewWithHash\)/);
+  assert.match(source, /history\.replaceState\(null, '', view === 'prompts' \? '#prompts' : '#workspaces'\)/);
+  assert.match(source, /showingPrompts \? '提示词看板' : '工作区'/);
+});
+
+test('workspace header panels return from prompts before opening backup or trash', async () => {
+  const [html, source] = await Promise.all([
+    readFile(new URL('../dashboard.html', import.meta.url), 'utf8'),
+    readFile(new URL('../dashboard.js', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(html, /<\/header>\s*<form id="appearance-panel" class="appearance-panel" hidden>/);
+  assert.match(source, /function openWorkspacePanel\(panel\) \{\s*if \(activeView === 'prompts'\) selectView\('workspaces'\);\s*setPanel\(panel, panel\.hidden\);\s*\}/s);
+  assert.match(source, /backup-toggle'\)\.addEventListener\('click', \(\) => openWorkspacePanel\(backupPanel\)\)/);
+  assert.match(source, /trash-toggle'\)\.addEventListener\('click', \(\) => openWorkspacePanel\(trashPanel\)\)/);
+});
