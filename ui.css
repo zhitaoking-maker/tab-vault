@@ -27,6 +27,35 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   min-height: 390px;
   background: var(--surface) var(--background-image) right bottom / 310px auto no-repeat;
 }
+.popup-tabs { display: flex; gap: 4px; margin: 0 0 15px; border-bottom: 1px solid var(--line); }
+.popup-tab {
+  position: relative;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+.popup-tab::after { position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; content: ""; background: transparent; }
+.popup-tab:hover { color: var(--ink); }
+.popup-tab.is-active { color: var(--accent); }
+.popup-tab.is-active::after { background: var(--accent); }
+.popup-view[hidden] { display: none; }
+.popup-prompt-search { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.popup-prompt-search input { width: 100%; min-height: 32px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; outline: 0; background: rgba(11, 14, 13, 0.64); color: var(--ink); font: inherit; font-size: 12px; }
+.popup-prompt-search input:focus { border-color: var(--accent); }
+.popup-prompt-list { display: grid; gap: 6px; max-height: 260px; margin-top: 10px; overflow-y: auto; overscroll-behavior: contain; }
+.popup-prompt-row { display: flex; align-items: center; min-width: 0; gap: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 4px; background: rgba(11, 14, 13, 0.46); }
+.popup-prompt-main { min-width: 0; flex: 1; }
+.popup-prompt-title-line { display: flex; align-items: center; min-width: 0; gap: 6px; }
+.popup-prompt-category { flex: 0 0 auto; padding: 1px 4px; border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent); border-radius: 3px; color: var(--accent); font-size: 9px; }
+.popup-prompt-title { min-width: 0; overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.popup-prompt-preview { margin: 4px 0 0; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.popup-prompt-row .button { flex: 0 0 auto; }
+.button-link { width: 100%; margin-top: 12px; padding: 5px 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; font: inherit; font-size: 11px; text-align: left; }
+.button-link:hover { color: color-mix(in srgb, var(--accent) 80%, white); }
 
 .panel { padding: 20px; }
 

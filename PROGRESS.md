@@ -23,3 +23,13 @@
 - Browser regression complete: `npm run test:dashboard` passed after normalizing legacy status records at the Dashboard boundary.
 - Step 3 complete: added `dashboard-prompt-view.test.js`; full `npm test` passed 103/103 with zero fail, cancelled, skipped, or todo tests.
 - Ready for commit: only the Phase 2 whitelist files are changed; no deferred decisions require BLOCKED.md.
+
+## Phase 3 Popup Prompt Quick Copy
+
+- Step 0 complete: on `feature/v0.5.0-prompt-vault` with a clean worktree; baseline `npm test` passed 103/103.
+- Scope: add a compact Popup workspace/prompt switcher, active-only workspace list, and prompt search with one-click copy.
+- Implementation order: preserve existing save actions, add view markup and compact styles, connect local prompt reads, then test and commit.
+- Maximum risk: Popup action handlers must remain available in the workspace view without inheriting Dashboard management complexity.
+- Step 1 and 2 implemented: Popup tabs preserve the save workflow, hide archived sessions, and add prompt-only search, copy, and Dashboard handoff.
+- Step 3 complete: added `popup-prompt-view.test.js`; full `npm test` passed 105/105 and browser regression passed with zero deferred decisions.
+- Ready for commit: only the Phase 3 whitelist files are changed; no BLOCKED.md is required.
