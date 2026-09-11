@@ -49,3 +49,14 @@
 - Retained: existing Hash routing, Header panel synchronization, and compliant muted/accent 2px tab indicator styling without unrelated CSS churn.
 - Verification complete: Dashboard-focused tests passed 5/5, full `npm test` passed 107/107, and browser regression passed.
 - Ready for commit: only the cleanup whitelist files changed; no BLOCKED.md is required.
+
+## Phase 1 Tags and Template Engine
+
+- Step 0 complete: on `feature/v0.6.0-tags-and-templates` with a clean worktree; baseline `npm test` passed 107/107.
+- Scope: evolve prompt data into compatible tags plus category records, and add pure `{{variable:default}}` extraction and rendering without UI, storage-core, or dependency changes.
+- Implementation order: normalize prompt fields and imports, add tag filters and ranking, add template functions and focused tests, then prove a deliberate assertion fails before the final commit.
+- Maximum risk: legacy `category` records must gain tags without losing their primary category or unrelated imported fields.
+- Step 1 complete: prompt creation, updates, exports, and merge imports now normalize `tags` while retaining a derived `category`; legacy category-only import records preserve unrelated fields.
+- Step 2 complete: added pure tag frequency ranking, dual tag/category filtering, variable extraction, and template rendering with defaults and replacement-safe callback handling.
+- Step 3 complete: targeted prompt-core suite passed 12/12; a deliberately incorrect tag count assertion failed 11/12 with expected 999 versus actual 2, then was restored.
+- Final gate complete: full `npm test` passed 114/114 with zero failures, cancellations, skips, or todos; only the Phase 1 whitelist files differ.
