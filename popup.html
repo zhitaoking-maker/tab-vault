@@ -44,6 +44,20 @@
           <input id="popup-prompt-search" type="search" placeholder="搜索提示词...">
         </label>
         <p id="popup-prompt-status" class="status" aria-live="polite"></p>
+        <section id="popup-prompt-fill-panel" class="popup-prompt-fill-panel" aria-labelledby="popup-prompt-fill-title" hidden>
+          <div class="popup-prompt-fill-heading">
+            <h2 id="popup-prompt-fill-title">填写参数</h2>
+            <span id="popup-prompt-fill-count"></span>
+          </div>
+          <form id="popup-prompt-fill-form">
+            <div id="popup-prompt-fill-fields" class="popup-prompt-fill-fields"></div>
+            <div class="popup-prompt-fill-actions">
+              <button id="popup-prompt-fill-submit" class="button button-restore" type="submit">确定复制</button>
+              <button id="popup-prompt-copy-original" class="button" type="button">复制原文</button>
+              <button id="popup-prompt-fill-cancel" class="button" type="button">取消</button>
+            </div>
+          </form>
+        </section>
         <div id="popup-prompt-list" class="popup-prompt-list"></div>
         <button id="popup-open-prompt-manager" class="button-link" type="button">打开提示词看板管理 ↗</button>
       </section>

@@ -71,3 +71,14 @@
 - Step 2 complete: card copy uses `extractVariables` to preserve zero-delay copying for plain text or open a native fill dialog; the dialog focuses its first field, submits on Enter through `renderTemplate`, and retains raw-copy, Escape, and backdrop-close exits.
 - Step 3 complete: targeted Dashboard prompt suite passed 8/8; full `npm test` passed 117/117 with zero failures, cancellations, skips, or todos; Chrome Dashboard regression passed after one transient existing Popup wait timeout rerun.
 - Final gate complete: only the Phase 2 whitelist files differ and the requested phase commit is ready.
+
+## Phase 3 Popup Tags and Template Fill
+
+- Step 0 complete: stayed on `feature/v0.6.0-tags-and-templates` with a clean worktree; baseline `npm test` passed 117/117.
+- Scope: display all prompt tags and provide an inline Popup template-fill flow, without changing Dashboard, core libraries, or dependencies.
+- Implementation order: replace the category badge with tag badges, add the compact fill panel and keyboard flow, extend Popup tests, then run the final gate and commit.
+- Maximum risk: the fill panel must return to the list after every exit path so the transient Chrome Popup remains compact and usable.
+- Step 1 complete: Popup cards now render every `tags` entry with legacy category fallback; search retains the shared title/body filter and adds case-insensitive tag matches at the UI boundary.
+- Step 2 complete: variable prompts open a compact inline panel that prepopulates defaults, focuses the first field, renders and copies on Enter, and restores the list after submit, raw copy, cancel, or Escape.
+- Step 3 complete: targeted Popup prompt suite passed 4/4; full `npm test` passed 119/119 with zero failures, cancellations, skips, or todos; Chrome Dashboard/Popup regression passed.
+- Final gate complete: only the Phase 3 whitelist files differ and the requested phase commit is ready.
