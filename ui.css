@@ -455,10 +455,15 @@ h2 { margin-bottom: 0; font-size: 13px; font-weight: 500; }
 .prompt-board-heading .eyebrow { margin-bottom: 4px; }
 .prompt-board-heading h2 { font-family: Georgia, "Songti SC", serif; font-size: 22px; font-weight: 500; }
 .prompt-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, 0.7fr) auto; align-items: end; gap: 12px; margin-top: 16px; }
-.prompt-categories { display: flex; min-width: 0; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
-.category-pill { flex: 0 0 auto; padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 11px; }
-.category-pill:hover { border-color: var(--accent); color: var(--accent); }
-.category-pill.is-active { border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--accent); }
+.prompt-tags { display: flex; align-items: center; min-width: 0; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.tag-pill, .tag-suggestion { flex: 0 0 auto; padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 11px; }
+.tag-pill:hover, .tag-suggestion:hover { border-color: var(--accent); color: var(--accent); }
+.tag-pill.is-active { border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--accent); }
+.more-tags-dropdown { position: relative; flex: 0 0 auto; }
+.more-tags-dropdown summary { padding: 5px 9px; border: 1px dashed var(--line); border-radius: 999px; color: var(--muted); cursor: pointer; font-size: 11px; list-style: none; white-space: nowrap; }
+.more-tags-dropdown summary::-webkit-details-marker { display: none; }
+.more-tags-dropdown[open] summary { border-color: var(--accent); color: var(--accent); }
+.more-tags-options { position: absolute; z-index: 3; top: calc(100% + 6px); right: 0; display: flex; width: min(320px, 75vw); flex-wrap: wrap; gap: 6px; padding: 9px; border: 1px solid var(--line); border-radius: 4px; background: #171c1a; box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28); }
 .prompt-search { display: grid; gap: 6px; color: var(--muted); font-size: 11px; }
 .prompt-search input { width: 100%; min-height: 32px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 4px; outline: 0; background: rgba(11, 14, 13, 0.64); color: var(--ink); font: inherit; font-size: 12px; }
 .prompt-search input:focus { border-color: var(--accent); }
@@ -469,7 +474,8 @@ h2 { margin-bottom: 0; font-size: 13px; font-weight: 500; }
 .prompt-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .prompt-card-heading { display: flex; align-items: start; justify-content: space-between; gap: 8px; }
 .prompt-title { min-width: 0; margin: 0; overflow: hidden; font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.prompt-category-badge { flex: 0 0 auto; padding: 2px 5px; border: 1px solid color-mix(in srgb, var(--accent) 36%, transparent); border-radius: 3px; color: var(--accent); font-size: 10px; }
+.prompt-card-tags { display: flex; min-height: 20px; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.prompt-tag-badge { padding: 2px 6px; border: 1px solid color-mix(in srgb, var(--accent) 36%, transparent); border-radius: 999px; color: var(--accent); font-size: 10px; }
 .prompt-content { display: -webkit-box; flex: 1; margin: 12px 0 8px; overflow: hidden; color: color-mix(in srgb, var(--ink) 88%, var(--muted)); font-size: 12px; line-height: 1.65; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .prompt-meta { color: var(--muted); font-size: 10px; }
 .prompt-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
@@ -485,6 +491,13 @@ h2 { margin-bottom: 0; font-size: 13px; font-weight: 500; }
 .prompt-dialog textarea { min-height: 150px; padding: 9px; resize: vertical; line-height: 1.55; }
 .prompt-dialog input:focus, .prompt-dialog textarea:focus { border-color: var(--accent); }
 .prompt-dialog-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 2px; }
+.prompt-tag-history { display: grid; gap: 7px; color: var(--muted); font-size: 11px; }
+.prompt-tag-suggestions { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag-suggestion { padding: 3px 7px; font-size: 10px; }
+.prompt-fill-description { margin: -3px 0 1px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.prompt-fill-fields { display: grid; gap: 10px; }
+.prompt-fill-fields label { grid-template-columns: minmax(92px, 0.35fr) minmax(0, 1fr); align-items: center; }
+.prompt-fill-actions { flex-wrap: wrap; }
 .toast { position: fixed; z-index: 10; top: 22px; left: 50%; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--line)); border-radius: 4px; background: rgba(14, 18, 16, 0.96); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22); color: var(--accent); font-size: 12px; transform: translateX(-50%); animation: toast-in 160ms ease-out; }
 .toast[hidden] { display: none; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, -5px); } to { opacity: 1; transform: translate(-50%, 0); } }

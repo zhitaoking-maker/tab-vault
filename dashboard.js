@@ -18,9 +18,12 @@ import { archiveWorkspace, unarchiveWorkspace } from './src/lib/workspace-core.j
 import {
   createPrompt,
   deletePrompt,
+  extractVariables,
   exportPromptsPayload,
   filterPrompts,
+  getAllTags,
   importPromptsPayload,
+  renderTemplate,
   updatePrompt,
 } from './src/lib/prompt-core.js';
 import { copyText, createElement, createWorkspaceRow, formatTime, sendMessage } from './shared-ui.js';
@@ -74,14 +77,20 @@ const archivedList = document.querySelector('#archived-list');
 const promptList = document.querySelector('#prompt-list');
 const promptSearch = document.querySelector('#prompt-search');
 const promptStatus = document.querySelector('#prompt-status');
-const promptCategories = document.querySelector('#prompt-categories');
+const promptTags = document.querySelector('#prompt-tags');
 const importPrompts = document.querySelector('#import-prompts');
 const promptDialog = document.querySelector('#prompt-dialog');
 const promptForm = document.querySelector('#prompt-form');
 const promptDialogTitle = document.querySelector('#prompt-dialog-title');
 const promptTitle = document.querySelector('#prompt-title');
-const promptCategory = document.querySelector('#prompt-category');
+const promptTagInput = document.querySelector('#prompt-tag-input');
+const promptTagSuggestions = document.querySelector('#prompt-tag-suggestions');
 const promptContent = document.querySelector('#prompt-content');
+const promptFillModal = document.querySelector('#prompt-fill-modal');
+const promptFillForm = document.querySelector('#prompt-fill-form');
+const promptFillTitle = document.querySelector('#prompt-fill-title');
+const promptFillDescription = document.querySelector('#prompt-fill-description');
+const promptFillFields = document.querySelector('#prompt-fill-fields');
 const toast = document.querySelector('#toast');
 
 let state = { workspaces: [], undo: null, trash: [], storageHealth: null };
@@ -98,9 +107,11 @@ let renderLimit = DEFAULT_WORKSPACE_RENDER_LIMIT;
 let appearance = { enabled: false, dim: 78, accent: DEFAULT_ACCENT_COLOR };
 let prompts = [];
 let activeView = 'workspaces';
-let activePromptCategory = 'all';
+const TOP_TAG_LIMIT = 8;
+let activePromptTag = 'all';
 let promptQuery = '';
 let editingPromptId = null;
+let fillingPrompt = null;
 let toastTimerId = null;
 const selectedTabs = new Map();
 const selectedWorkspaces = new Set();
@@ -438,10 +449,11 @@ function render() {
 function createPromptCard(prompt) {
   const card = createElement('article', 'prompt-card');
   const heading = createElement('div', 'prompt-card-heading');
-  heading.append(
-    createElement('h3', 'prompt-title', prompt.title),
-    createElement('span', 'prompt-category-badge', prompt.category),
-  );
+  heading.append(createElement('h3', 'prompt-title', prompt.title));
+  const tags = createElement('div', 'prompt-card-tags');
+  for (const tag of prompt.tags ?? [prompt.category]) {
+    if (tag) tags.append(createElement('span', 'prompt-tag-badge', tag));
+  }
   const content = createElement('p', 'prompt-content', prompt.content);
   const meta = createElement('span', 'prompt-meta', `更新于 ${formatTime(prompt.updatedAt)}`);
   const actions = createElement('div', 'prompt-actions');
@@ -455,16 +467,44 @@ function createPromptCard(prompt) {
   remove.type = 'button';
   remove.addEventListener('click', () => deletePromptById(prompt.id));
   actions.append(copy, edit, remove);
-  card.append(heading, content, meta, actions);
+  card.append(heading, tags, content, meta, actions);
   return card;
 }
 
-function renderPromptBoard() {
-  for (const button of promptCategories.querySelectorAll('.category-pill')) {
-    button.classList.toggle('is-active', button.dataset.category === activePromptCategory);
+function createPromptTagPill({ name, count }) {
+  const button = createElement('button', 'tag-pill', count === undefined ? name : `${name} ${count}`);
+  button.type = 'button';
+  button.dataset.tag = name;
+  button.classList.toggle('is-active', name === activePromptTag);
+  button.addEventListener('click', () => {
+    activePromptTag = name;
+    renderPromptBoard();
+  });
+  return button;
+}
+
+function renderPromptTags() {
+  const rankedTags = getAllTags(prompts);
+  const allPill = createPromptTagPill({ name: 'all' });
+  allPill.textContent = '全部';
+  const topTags = rankedTags.slice(0, TOP_TAG_LIMIT);
+  const remainingTags = rankedTags.slice(TOP_TAG_LIMIT);
+  promptTags.replaceChildren(allPill, ...topTags.map(createPromptTagPill));
+
+  if (remainingTags.length) {
+    const moreTags = createElement('details', 'more-tags-dropdown');
+    const summary = createElement('summary', '', `更多标签 (${remainingTags.length})`);
+    const options = createElement('div', 'more-tags-options');
+    options.append(...remainingTags.map(createPromptTagPill));
+    moreTags.append(summary, options);
+    promptTags.append(moreTags);
   }
+}
+
+function renderPromptBoard() {
+  renderPromptTags();
   promptList.replaceChildren();
-  const visiblePrompts = filterPrompts(prompts, { category: activePromptCategory, query: promptQuery });
+  const visiblePrompts = filterPrompts(prompts, { tag: activePromptTag, query: promptQuery });
   if (!visiblePrompts.length) {
     const message = prompts.length ? '没有匹配的提示词。' : '还没有提示词。新建一条，开始积累自己的提示词库。';
     promptList.append(createElement('p', 'empty-state', message));
@@ -485,12 +525,71 @@ async function persistPrompts(nextPrompts) {
   renderPromptBoard();
 }
 
-async function copyPrompt(prompt) {
+async function writePromptText(content, successMessage) {
   try {
-    await navigator.clipboard.writeText(prompt.content);
-    showToast('已复制到剪贴板');
+    await navigator.clipboard.writeText(content);
+    showToast(successMessage);
+    return true;
   } catch {
     setPromptStatus('无法访问剪贴板，请检查浏览器权限。');
+    return false;
+  }
+}
+
+async function copyPrompt(prompt) {
+  const variables = extractVariables(prompt.content);
+  if (!variables.length) {
+    await writePromptText(prompt.content, '已复制到剪贴板');
+    return;
+  }
+  openPromptFillModal(prompt, variables);
+}
+
+function openPromptFillModal(prompt, variables) {
+  fillingPrompt = prompt;
+  promptFillTitle.textContent = `填写参数：${prompt.title}`;
+  promptFillDescription.textContent = '填写后按 Enter 复制；也可直接复制未替换的模板原文。';
+  promptFillFields.replaceChildren();
+  const inputs = variables.map(({ name, defaultValue }) => {
+    const label = createElement('label', '', name);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = defaultValue;
+    input.dataset.variableName = name;
+    input.setAttribute('aria-label', name);
+    label.append(input);
+    promptFillFields.append(label);
+    return input;
+  });
+  promptFillModal.showModal();
+  requestAnimationFrame(() => inputs[0]?.focus());
+}
+
+async function copyFilledPrompt() {
+  if (!fillingPrompt) return;
+  const values = Object.fromEntries([...promptFillFields.querySelectorAll('input')]
+    .map((input) => [input.dataset.variableName, input.value]));
+  const rendered = renderTemplate(fillingPrompt.content, values);
+  if (await writePromptText(rendered, '已填入并复制')) promptFillModal.close();
+}
+
+async function copyPromptOriginal() {
+  if (!fillingPrompt) return;
+  if (await writePromptText(fillingPrompt.content, '已复制模板原文')) promptFillModal.close();
+}
+
+function renderPromptTagSuggestions() {
+  promptTagSuggestions.replaceChildren();
+  for (const { name } of getAllTags(prompts).slice(0, 10)) {
+    const suggestion = createElement('button', 'tag-suggestion', name);
+    suggestion.type = 'button';
+    suggestion.addEventListener('click', () => {
+      const existing = promptTagInput.value.split(/[\s,]+/).filter(Boolean);
+      if (!existing.includes(name)) existing.push(name);
+      promptTagInput.value = existing.join(', ');
+      promptTagInput.focus();
+    });
+    promptTagSuggestions.append(suggestion);
   }
 }
 
@@ -498,8 +597,9 @@ function openPromptDialog(prompt = null) {
   editingPromptId = prompt?.id ?? null;
   promptDialogTitle.textContent = prompt ? '编辑提示词' : '新建提示词';
   promptTitle.value = prompt?.title ?? '';
-  promptCategory.value = prompt?.category ?? '通用';
+  promptTagInput.value = (prompt?.tags ?? [prompt?.category ?? '通用']).filter(Boolean).join(', ');
   promptContent.value = prompt?.content ?? '';
+  renderPromptTagSuggestions();
   promptDialog.showModal();
   promptTitle.focus();
 }
@@ -794,13 +894,6 @@ backgroundRemove.addEventListener('click', async () => {
   setStatus('已移除自定义背景。');
 });
 
-promptCategories.addEventListener('click', (event) => {
-  const button = event.target.closest('.category-pill');
-  if (!button) return;
-  activePromptCategory = button.dataset.category;
-  renderPromptBoard();
-});
-
 promptSearch.addEventListener('input', () => {
   promptQuery = promptSearch.value;
   renderPromptBoard();
@@ -810,19 +903,32 @@ document.querySelector('#new-prompt').addEventListener('click', () => openPrompt
 document.querySelector('#export-prompts').addEventListener('click', downloadPrompts);
 document.querySelector('#prompt-dialog-close').addEventListener('click', () => promptDialog.close());
 document.querySelector('#prompt-cancel').addEventListener('click', () => promptDialog.close());
+document.querySelector('#prompt-fill-close').addEventListener('click', () => promptFillModal.close());
+document.querySelector('#prompt-fill-cancel').addEventListener('click', () => promptFillModal.close());
+document.querySelector('#prompt-copy-original').addEventListener('click', copyPromptOriginal);
+promptFillModal.addEventListener('click', (event) => {
+  if (event.target === promptFillModal) promptFillModal.close();
+});
+promptFillModal.addEventListener('close', () => {
+  fillingPrompt = null;
+});
+promptFillForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await copyFilledPrompt();
+});
 
 promptForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const fields = {
     title: promptTitle.value,
-    category: promptCategory.value,
+    tags: promptTagInput.value.split(/[\s,]+/).filter(Boolean),
     content: promptContent.value,
   };
   const nextPrompts = editingPromptId
     ? updatePrompt(prompts, editingPromptId, fields)
     : createPrompt(prompts, fields);
   if (nextPrompts === prompts) {
-    setPromptStatus('标题、分类和正文都不能为空。');
+    setPromptStatus('标题和正文都不能为空。');
     return;
   }
   await persistPrompts(nextPrompts);

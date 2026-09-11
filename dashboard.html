@@ -121,12 +121,7 @@
           <button id="new-prompt" class="button button-restore" type="button">+ 新建提示词</button>
         </div>
         <div class="prompt-toolbar">
-          <div id="prompt-categories" class="prompt-categories" aria-label="提示词分类">
-            <button class="category-pill is-active" type="button" data-category="all">全部</button>
-            <button class="category-pill" type="button" data-category="通用">通用</button>
-            <button class="category-pill" type="button" data-category="代码">代码</button>
-            <button class="category-pill" type="button" data-category="写作">写作</button>
-          </div>
+          <div id="prompt-tags" class="prompt-tags" aria-label="提示词标签"></div>
           <label class="prompt-search">搜索提示词
             <input id="prompt-search" type="search" placeholder="标题或正文">
           </label>
@@ -150,16 +145,34 @@
         <label>标题
           <input id="prompt-title" name="title" maxlength="100" required>
         </label>
-        <label>分类
-          <input id="prompt-category" name="category" list="prompt-category-options" maxlength="40" required>
-          <datalist id="prompt-category-options"><option value="通用"></option><option value="代码"></option><option value="写作"></option></datalist>
+        <label>标签
+          <input id="prompt-tag-input" name="tags" maxlength="160" placeholder="例如：代码, 审查, JavaScript">
         </label>
+        <div class="prompt-tag-history" aria-label="常用历史标签">
+          <span>常用历史标签</span>
+          <div id="prompt-tag-suggestions" class="prompt-tag-suggestions"></div>
+        </div>
         <label>正文
           <textarea id="prompt-content" name="content" rows="9" required></textarea>
         </label>
         <div class="prompt-dialog-actions">
           <button id="prompt-cancel" class="button" type="button">取消</button>
           <button class="button button-restore" type="submit">保存提示词</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="prompt-fill-modal" class="prompt-dialog prompt-fill-modal" aria-labelledby="prompt-fill-title">
+      <form id="prompt-fill-form" method="dialog">
+        <div class="prompt-dialog-heading">
+          <h2 id="prompt-fill-title">填写参数</h2>
+          <button id="prompt-fill-close" class="report-close" type="button" aria-label="关闭参数填写">×</button>
+        </div>
+        <p id="prompt-fill-description" class="prompt-fill-description"></p>
+        <div id="prompt-fill-fields" class="prompt-fill-fields"></div>
+        <div class="prompt-dialog-actions prompt-fill-actions">
+          <button id="prompt-copy-original" class="button" type="button">复制模板原文</button>
+          <button id="prompt-fill-cancel" class="button" type="button">取消</button>
+          <button class="button button-restore" type="submit">填入并复制</button>
         </div>
       </form>
     </dialog>

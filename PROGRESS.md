@@ -60,3 +60,14 @@
 - Step 2 complete: added pure tag frequency ranking, dual tag/category filtering, variable extraction, and template rendering with defaults and replacement-safe callback handling.
 - Step 3 complete: targeted prompt-core suite passed 12/12; a deliberately incorrect tag count assertion failed 11/12 with expected 999 versus actual 2, then was restored.
 - Final gate complete: full `npm test` passed 114/114 with zero failures, cancellations, skips, or todos; only the Phase 1 whitelist files differ.
+
+## Phase 2 Dashboard Tags and Template Fill
+
+- Step 0 complete: stayed on `feature/v0.6.0-tags-and-templates` with a clean worktree; baseline `npm test` passed 114/114.
+- Scope: render Dashboard tag governance from the Phase 1 core functions and provide a native parameter-fill copy dialog, without changing shared cores, Popup, or dependencies.
+- Implementation order: replace fixed categories with ranked tag controls, update editor tags and historical reuse, add parameterized copy flow, then test and commit.
+- Maximum risk: direct-copy behavior must remain immediate for non-template prompts while template content always retains an explicit raw-copy escape hatch.
+- Step 1 complete: Dashboard now renders the all-tag control, eight ranked tags, and an overflow `details` menu from `getAllTags`; cards show every tag and the editor offers comma/space input plus the ten most frequent reusable tags.
+- Step 2 complete: card copy uses `extractVariables` to preserve zero-delay copying for plain text or open a native fill dialog; the dialog focuses its first field, submits on Enter through `renderTemplate`, and retains raw-copy, Escape, and backdrop-close exits.
+- Step 3 complete: targeted Dashboard prompt suite passed 8/8; full `npm test` passed 117/117 with zero failures, cancellations, skips, or todos; Chrome Dashboard regression passed after one transient existing Popup wait timeout rerun.
+- Final gate complete: only the Phase 2 whitelist files differ and the requested phase commit is ready.
