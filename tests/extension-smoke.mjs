@@ -107,7 +107,9 @@ try {
   const { url, text: bodyText } = pageState.result.value;
 
   assert.match(url, /dashboard\.html$/);
-  assert.match(bodyText, /工作区时间线/);
+  assert.match(bodyText, /已保存的工作区/);
+  assert.match(bodyText, /备份/);
+  assert.match(bodyText, /回收站/);
   assert.match(bodyText, /还没有存下任何工作区/);
   const screenshot = await pageCdp.send('Page.captureScreenshot', { format: 'png' });
   await writeFile(path.join(profile, 'dashboard.png'), screenshot.data, 'base64');

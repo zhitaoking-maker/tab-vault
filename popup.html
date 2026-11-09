@@ -15,18 +15,51 @@
         </div>
         <button id="open-dashboard" class="icon-command" type="button" title="打开总览">总览</button>
       </header>
-      <button id="save-current" class="save-button" type="button">压缩当前窗口</button>
-      <section id="undo-bar" class="undo-bar" hidden>
-        <span id="undo-text"></span>
-        <button id="undo-save" type="button">撤销</button>
-      </section>
-      <p id="status" class="status" aria-live="polite"></p>
-      <section class="timeline-section">
-        <div class="section-heading">
-          <h2>最近保存</h2>
-          <span id="workspace-count"></span>
+      <nav class="popup-tabs" aria-label="弹窗视图">
+        <button id="tab-workspaces" class="popup-tab is-active" type="button" role="tab" aria-selected="true">工作区</button>
+        <button id="tab-prompts" class="popup-tab" type="button" role="tab" aria-selected="false">提示词</button>
+      </nav>
+      <section id="popup-workspace-panel" class="popup-view" role="tabpanel" aria-labelledby="tab-workspaces">
+        <button id="save-current" class="save-button" type="button">压缩当前窗口</button>
+        <div class="save-secondary-actions">
+          <button id="save-current-group" class="button" type="button">压缩当前标签组</button>
+          <button id="save-all-windows" class="button" type="button">保存全部窗口</button>
         </div>
-        <div id="workspace-list" class="workspace-list"></div>
+        <p class="shortcut-hint">快捷键 Alt + Shift + V · 可在 Chrome 扩展快捷键中修改</p>
+        <section id="undo-bar" class="undo-bar" hidden>
+          <span id="undo-text"></span>
+          <button id="undo-save" type="button">撤销</button>
+        </section>
+        <p id="status" class="status" aria-live="polite"></p>
+        <section class="timeline-section">
+          <div class="section-heading">
+            <h2>最近保存</h2>
+            <span id="workspace-count"></span>
+          </div>
+          <div id="workspace-list" class="workspace-list"></div>
+        </section>
+      </section>
+      <section id="popup-prompt-panel" class="popup-view popup-prompt-panel" role="tabpanel" aria-labelledby="tab-prompts" hidden>
+        <label class="popup-prompt-search">搜索提示词
+          <input id="popup-prompt-search" type="search" placeholder="搜索提示词...">
+        </label>
+        <p id="popup-prompt-status" class="status" aria-live="polite"></p>
+        <section id="popup-prompt-fill-panel" class="popup-prompt-fill-panel" aria-labelledby="popup-prompt-fill-title" hidden>
+          <div class="popup-prompt-fill-heading">
+            <h2 id="popup-prompt-fill-title">填写参数</h2>
+            <span id="popup-prompt-fill-count"></span>
+          </div>
+          <form id="popup-prompt-fill-form">
+            <div id="popup-prompt-fill-fields" class="popup-prompt-fill-fields"></div>
+            <div class="popup-prompt-fill-actions">
+              <button id="popup-prompt-fill-submit" class="button button-restore" type="submit">确定复制</button>
+              <button id="popup-prompt-copy-original" class="button" type="button">复制原文</button>
+              <button id="popup-prompt-fill-cancel" class="button" type="button">取消</button>
+            </div>
+          </form>
+        </section>
+        <div id="popup-prompt-list" class="popup-prompt-list"></div>
+        <button id="popup-open-prompt-manager" class="button-link" type="button">打开提示词看板管理 ↗</button>
       </section>
     </main>
     <script type="module" src="popup.js"></script>

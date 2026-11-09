@@ -2,7 +2,31 @@ import { deleteCustomBackground, getCustomBackground, saveCustomBackground, vali
 import { accentInkColor, DEFAULT_ACCENT_COLOR, normalizeAccentColor } from './src/lib/appearance-rules.js';
 import { getUndoPresentation } from './src/lib/undo-presentation.js';
 import { matchesWorkspaceQuery } from './src/lib/workspace-query.js';
-import { createElement, createWorkspaceRow, sendMessage } from './shared-ui.js';
+import {
+  formatStorageUsage,
+  importFailureMessage,
+  importPreviewMessage,
+  restoreResultMessage,
+} from './src/lib/v02-presentation.js';
+import {
+  DEFAULT_WORKSPACE_RENDER_LIMIT,
+  getWorkspaceRenderSlice,
+  restoreProgressMessage,
+} from './src/lib/v03-presentation.js';
+import { clipboardSuccessMessage, formatWorkspaceClipboard } from './src/lib/v04-presentation.js';
+import { archiveWorkspace, unarchiveWorkspace } from './src/lib/workspace-core.js';
+import {
+  createPrompt,
+  deletePrompt,
+  extractVariables,
+  exportPromptsPayload,
+  filterPrompts,
+  getAllTags,
+  importPromptsPayload,
+  renderTemplate,
+  updatePrompt,
+} from './src/lib/prompt-core.js';
+import { copyText, createElement, createWorkspaceRow, formatTime, sendMessage } from './shared-ui.js';
 
 const APPEARANCE_KEY = 'appearance';
 const list = document.querySelector('#workspace-list');
@@ -12,32 +36,126 @@ const searchInput = document.querySelector('#workspace-search');
 const undoBar = document.querySelector('#undo-bar');
 const undoText = document.querySelector('#undo-text');
 const appearancePanel = document.querySelector('#appearance-panel');
+const backupPanel = document.querySelector('#backup-panel');
+const trashPanel = document.querySelector('#trash-panel');
+const trashList = document.querySelector('#trash-list');
+const trashCount = document.querySelector('#trash-count');
+const emptyTrash = document.querySelector('#empty-trash');
+const storageWarning = document.querySelector('#storage-warning');
+const storageLabel = document.querySelector('#storage-label');
+const storageMeter = document.querySelector('#storage-meter');
+const backupSelectionCount = document.querySelector('#backup-selection-count');
+const exportSelected = document.querySelector('#export-selected');
+const pinSelected = document.querySelector('#pin-selected');
+const unpinSelected = document.querySelector('#unpin-selected');
+const trashSelected = document.querySelector('#trash-selected');
+const importFile = document.querySelector('#import-file');
+const importPreview = document.querySelector('#import-preview');
+const importPreviewText = document.querySelector('#import-preview-text');
+const importConfirm = document.querySelector('#import-confirm');
+const restoreReport = document.querySelector('#restore-report');
+const restoreReportText = document.querySelector('#restore-report-text');
+const retryRestore = document.querySelector('#retry-restore');
+const restoreProgress = document.querySelector('#restore-progress');
+const restoreProgressText = document.querySelector('#restore-progress-text');
+const restoreProgressCount = document.querySelector('#restore-progress-count');
+const restoreProgressMeter = document.querySelector('#restore-progress-meter');
+const loadMore = document.querySelector('#load-more');
 const backgroundFile = document.querySelector('#background-file');
 const backgroundDim = document.querySelector('#background-dim');
 const backgroundRemove = document.querySelector('#background-remove');
 const accentColor = document.querySelector('#accent-color');
-const appearanceClose = document.querySelector('#appearance-close');
-let state = { workspaces: [], undo: null };
+const workspaceView = document.querySelector('#workspace-view');
+const promptBoard = document.querySelector('#prompt-board');
+const workspaceTab = document.querySelector('#workspace-tab');
+const promptTab = document.querySelector('#prompt-tab');
+const dashboardTitle = document.querySelector('#dashboard-title');
+const dashboardSubtitle = document.querySelector('#dashboard-subtitle');
+const archiveDrawer = document.querySelector('#archive-drawer');
+const archivedCount = document.querySelector('#archived-count');
+const archivedList = document.querySelector('#archived-list');
+const promptList = document.querySelector('#prompt-list');
+const promptSearch = document.querySelector('#prompt-search');
+const promptStatus = document.querySelector('#prompt-status');
+const promptTags = document.querySelector('#prompt-tags');
+const importPrompts = document.querySelector('#import-prompts');
+const promptDialog = document.querySelector('#prompt-dialog');
+const promptForm = document.querySelector('#prompt-form');
+const promptDialogTitle = document.querySelector('#prompt-dialog-title');
+const promptTitle = document.querySelector('#prompt-title');
+const promptTagInput = document.querySelector('#prompt-tag-input');
+const promptTagSuggestions = document.querySelector('#prompt-tag-suggestions');
+const promptContent = document.querySelector('#prompt-content');
+const promptFillModal = document.querySelector('#prompt-fill-modal');
+const promptFillForm = document.querySelector('#prompt-fill-form');
+const promptFillTitle = document.querySelector('#prompt-fill-title');
+const promptFillDescription = document.querySelector('#prompt-fill-description');
+const promptFillFields = document.querySelector('#prompt-fill-fields');
+const toast = document.querySelector('#toast');
+
+let state = { workspaces: [], undo: null, trash: [], storageHealth: null };
 let expandedId = null;
 let editingId = null;
 let query = '';
 let timerId = null;
 let backgroundUrl = null;
+let pendingImportText = null;
+let lastRetry = null;
+let activeRestoreJob = null;
+let currentRestoreProgress = null;
+let renderLimit = DEFAULT_WORKSPACE_RENDER_LIMIT;
 let appearance = { enabled: false, dim: 78, accent: DEFAULT_ACCENT_COLOR };
+let prompts = [];
+let activeView = 'workspaces';
+const TOP_TAG_LIMIT = 8;
+let activePromptTag = 'all';
+let promptQuery = '';
+let editingPromptId = null;
+let fillingPrompt = null;
+let toastTimerId = null;
 const selectedTabs = new Map();
+const selectedWorkspaces = new Set();
 
 function setStatus(message) {
   status.textContent = message;
 }
 
-function resultMessage(result) {
-  if (result.restored) {
-    const skipped = result.skippedDuplicateCount ? `，跳过 ${result.skippedDuplicateCount} 个已打开页面。` : '。';
-    return `已在新窗口恢复 ${result.restoredCount} 个标签${skipped}`;
-  }
-  if (result.reason === 'already-open') return `没有新开标签，${result.skippedDuplicateCount} 个页面已在其他窗口打开。`;
-  if (result.reason === 'no-recoverable-tabs') return '这条记录没有可恢复的网页。';
-  return '这个工作区已不存在。';
+function setPromptStatus(message) {
+  promptStatus.textContent = message;
+}
+
+function showToast(message) {
+  clearTimeout(toastTimerId);
+  toast.textContent = message;
+  toast.hidden = false;
+  toastTimerId = setTimeout(() => {
+    toast.hidden = true;
+  }, 1200);
+}
+
+function setActiveView(view) {
+  activeView = view;
+  const showingPrompts = view === 'prompts';
+  workspaceView.hidden = showingPrompts;
+  promptBoard.hidden = !showingPrompts;
+  workspaceTab.classList.toggle('is-active', !showingPrompts);
+  workspaceTab.setAttribute('aria-selected', String(!showingPrompts));
+  promptTab.classList.toggle('is-active', showingPrompts);
+  promptTab.setAttribute('aria-selected', String(showingPrompts));
+  dashboardTitle.textContent = showingPrompts ? '提示词' : '工作区';
+  dashboardSubtitle.textContent = showingPrompts
+    ? '这里放着你常用的提示词与思考资产。'
+    : '这里放着你暂时离开的网页现场。';
+  if (showingPrompts) renderPromptBoard();
+}
+
+function syncViewWithHash() {
+  setActiveView(window.location.hash === '#prompts' ? 'prompts' : 'workspaces');
+}
+
+function selectView(view) {
+  history.replaceState(null, '', view === 'prompts' ? '#prompts' : '#workspaces');
+  setActiveView(view);
 }
 
 function selectedFor(workspaceId) {
@@ -45,18 +163,77 @@ function selectedFor(workspaceId) {
   return selectedTabs.get(workspaceId);
 }
 
-async function restore(workspaceId, tabIndexes) {
-  const result = await sendMessage({ type: 'restore-workspace', workspaceId, tabIndexes });
-  setStatus(resultMessage(result));
-  if (result.restored) selectedTabs.delete(workspaceId);
-  await refresh();
+function setPanel(panel, open) {
+  for (const candidate of [backupPanel, trashPanel, appearancePanel]) {
+    candidate.hidden = candidate !== panel || !open;
+  }
+  if (!open || panel !== backupPanel) selectedWorkspaces.clear();
+  renderBackupSelection();
+  render();
+}
+
+function showRestoreResult(result, workspaceId) {
+  const message = restoreResultMessage(result, true);
+  setStatus(message);
+  const hasDetails = Boolean(
+    result.failedCount || result.unsupportedCount || result.pinFailedCount || result.groupFailedCount,
+  );
+  restoreReport.hidden = !hasDetails;
+  restoreReportText.textContent = message;
+  retryRestore.hidden = !result.failedCount;
+  lastRetry = result.failedCount ? {
+    workspaceId,
+    tabIndexes: result.failedTabs.map((tab) => tab.index),
+    windowId: result.windowId,
+    existingGroupIds: result.restoredGroups,
+  } : null;
+}
+
+async function restore(workspaceId, tabIndexes, windowId, existingGroupIds) {
+  if (activeRestoreJob) return;
+  const restoreJobId = crypto.randomUUID();
+  activeRestoreJob = restoreJobId;
+  currentRestoreProgress = {
+    phase: 'tabs', processedCount: 0, totalCount: 0, restoredCount: 0, failedCount: 0,
+    groupCompletedCount: 0, groupTotalCount: 0,
+  };
+  renderRestoreProgress();
+  render();
+  try {
+    const result = await sendMessage({
+      type: 'restore-workspace', workspaceId, tabIndexes, windowId, restoreJobId, existingGroupIds,
+    });
+    showRestoreResult(result, workspaceId);
+    if (result.restored) selectedTabs.delete(workspaceId);
+  } catch {
+    setStatus('恢复没有完成，请再试一次。');
+  } finally {
+    activeRestoreJob = null;
+    currentRestoreProgress = null;
+    renderRestoreProgress();
+    await refresh();
+  }
+}
+
+async function copyWorkspace(workspace, format) {
+  const copied = await copyText(formatWorkspaceClipboard(workspace, format));
+  const count = workspace.tabs.filter((tab) => tab.restorable && typeof tab.url === 'string').length;
+  setStatus(copied ? clipboardSuccessMessage(format, count) : '这个工作区没有可复制的网页。');
 }
 
 function createRow(workspace) {
-  return createWorkspaceRow(workspace, {
+  const row = createWorkspaceRow(workspace, {
     expanded: workspace.id === expandedId,
     editing: workspace.id === editingId,
+    selectable: !backupPanel.hidden,
+    selected: selectedWorkspaces.has(workspace.id),
     selectedTabIndexes: selectedFor(workspace.id),
+    restoring: Boolean(activeRestoreJob),
+    onWorkspaceSelectionChange: (checked) => {
+      if (checked) selectedWorkspaces.add(workspace.id);
+      else selectedWorkspaces.delete(workspace.id);
+      renderBackupSelection();
+    },
     onToggle: () => {
       expandedId = expandedId === workspace.id ? null : workspace.id;
       render();
@@ -81,7 +258,7 @@ function createRow(workspace) {
       }
       selectedTabs.delete(workspace.id);
       if (result.workspaceDeleted) expandedId = null;
-      setStatus(result.workspaceDeleted ? '工作区已删除。' : `已移除 ${result.removedTabCount} 个标签。`);
+      setStatus(result.workspaceDeleted ? '工作区已移入回收站。' : `已移除 ${result.removedTabCount} 个标签。`);
       await refresh();
     },
     onTogglePin: async () => {
@@ -103,14 +280,52 @@ function createRow(workspace) {
       render();
     },
     onDelete: async () => {
-      await sendMessage({ type: 'delete-workspace', workspaceId: workspace.id });
+      const result = await sendMessage({ type: 'delete-workspace', workspaceId: workspace.id });
       selectedTabs.delete(workspace.id);
+      selectedWorkspaces.delete(workspace.id);
       if (expandedId === workspace.id) expandedId = null;
       if (editingId === workspace.id) editingId = null;
-      setStatus('工作区已删除。');
+      setStatus(result.deleted ? '工作区已移入回收站。' : '工作区已不存在。');
       await refresh();
     },
+    onCopyList: () => copyWorkspace(workspace, 'list'),
+    onCopyUrls: () => copyWorkspace(workspace, 'urls'),
+    onCopyMarkdown: () => copyWorkspace(workspace, 'markdown'),
   });
+  const archive = createElement('button', 'button button-archive', '归档 📦');
+  archive.type = 'button';
+  archive.addEventListener('click', () => archiveWorkspaceById(workspace.id));
+  row.querySelector('.workspace-controls').append(archive);
+  return row;
+}
+
+async function updateArchivedWorkspace(workspaceId, operation) {
+  const stored = await chrome.storage.local.get('workspaces');
+  const workspaces = Array.isArray(stored.workspaces) ? stored.workspaces : [];
+  const updated = operation(workspaces, workspaceId);
+  if (updated === workspaces) return false;
+  await chrome.storage.local.set({ workspaces: updated });
+  return true;
+}
+
+async function archiveWorkspaceById(workspaceId) {
+  const updated = await updateArchivedWorkspace(workspaceId, archiveWorkspace);
+  if (!updated) {
+    setStatus('工作区已不存在。');
+    return;
+  }
+  selectedTabs.delete(workspaceId);
+  selectedWorkspaces.delete(workspaceId);
+  if (expandedId === workspaceId) expandedId = null;
+  if (editingId === workspaceId) editingId = null;
+  setStatus('工作区已归档。');
+  await refresh();
+}
+
+async function unarchiveWorkspaceById(workspaceId) {
+  const updated = await updateArchivedWorkspace(workspaceId, unarchiveWorkspace);
+  setStatus(updated ? '工作区已恢复为活跃状态。' : '工作区已不存在。');
+  await refresh();
 }
 
 function appendGroup(label, workspaces) {
@@ -121,17 +336,290 @@ function appendGroup(label, workspaces) {
   list.append(group);
 }
 
+function renderBackupSelection() {
+  const selectedCount = selectedWorkspaces.size;
+  backupSelectionCount.textContent = selectedCount ? `已选 ${selectedCount} 个工作区` : '未选择工作区';
+  exportSelected.disabled = selectedCount === 0;
+  pinSelected.disabled = selectedCount === 0;
+  unpinSelected.disabled = selectedCount === 0;
+  trashSelected.disabled = selectedCount === 0;
+}
+
+function renderRestoreProgress() {
+  restoreProgress.hidden = !currentRestoreProgress;
+  if (!currentRestoreProgress) return;
+  const progress = currentRestoreProgress;
+  const totalSteps = progress.totalCount + progress.groupTotalCount;
+  const completedSteps = progress.processedCount + progress.groupCompletedCount;
+  restoreProgressText.textContent = restoreProgressMessage(progress);
+  restoreProgressCount.textContent = totalSteps ? `${completedSteps} / ${totalSteps}` : '准备中';
+  restoreProgressMeter.value = totalSteps ? completedSteps / totalSteps : 0;
+}
+
+function renderStorageHealth() {
+  if (!state.storageHealth) return;
+  storageLabel.textContent = formatStorageUsage(state.storageHealth);
+  storageMeter.value = Math.min(1, state.storageHealth.ratio);
+  storageMeter.classList.toggle('is-warning', state.storageHealth.warning);
+  storageWarning.hidden = !state.storageHealth.warning;
+}
+
+function renderTrash() {
+  trashList.replaceChildren();
+  trashCount.textContent = state.trash.length ? String(state.trash.length) : '';
+  emptyTrash.disabled = state.trash.length === 0;
+  if (!state.trash.length) {
+    trashList.append(createElement('p', 'empty-state', '回收站为空。'));
+    return;
+  }
+  for (const workspace of state.trash) {
+    const row = createElement('article', 'trash-row');
+    const summary = createElement('div', 'trash-summary');
+    summary.append(
+      createElement('span', 'trash-title', workspace.title),
+      createElement('span', 'trash-meta', `${formatTime(workspace.deletedAt)} · ${workspace.tabCount} 个标签`),
+    );
+    const actions = createElement('div', 'trash-actions');
+    const recover = createElement('button', 'button button-restore', '恢复');
+    recover.type = 'button';
+    recover.addEventListener('click', async () => {
+      const result = await sendMessage({ type: 'restore-trash-workspace', workspaceId: workspace.id });
+      setStatus(result.restored ? '工作区已从回收站恢复。' : '这条记录已不存在。');
+      await refresh();
+    });
+    const remove = createElement('button', 'button button-danger', '永久删除');
+    remove.type = 'button';
+    remove.addEventListener('click', async () => {
+      if (!globalThis.confirm(`永久删除「${workspace.title}」？`)) return;
+      await sendMessage({ type: 'permanently-delete-trash', workspaceId: workspace.id });
+      setStatus('已永久删除。');
+      await refresh();
+    });
+    actions.append(recover, remove);
+    row.append(summary, actions);
+    trashList.append(row);
+  }
+}
+
+function renderArchiveDrawer(archivedWorkspaces) {
+  archivedCount.textContent = `(${archivedWorkspaces.length})`;
+  archivedList.replaceChildren();
+  if (!archivedWorkspaces.length) {
+    archivedList.append(createElement('p', 'empty-state', '还没有归档的工作区。'));
+    return;
+  }
+  for (const workspace of archivedWorkspaces) {
+    const row = createElement('article', 'archived-row');
+    const summary = createElement('div', 'archived-summary');
+    summary.append(
+      createElement('span', 'archived-title', workspace.title),
+      createElement('span', 'archived-meta', `${workspace.tabCount} 个标签 · ${formatTime(workspace.archivedAt || workspace.createdAt)}`),
+    );
+    const restore = createElement('button', 'button button-restore', '恢复活跃 ↩');
+    restore.type = 'button';
+    restore.addEventListener('click', () => unarchiveWorkspaceById(workspace.id));
+    row.append(summary, restore);
+    archivedList.append(row);
+  }
+}
+
 function render() {
   list.replaceChildren();
-  const visible = state.workspaces.filter((workspace) => matchesWorkspaceQuery(workspace, query));
-  count.textContent = query ? `${visible.length} / ${state.workspaces.length} 条记录` : `${state.workspaces.length} 条记录`;
+  const activeWorkspaces = state.workspaces.filter((workspace) => workspace.status === 'active');
+  const archivedWorkspaces = state.workspaces.filter((workspace) => workspace.status === 'archived');
+  const visible = activeWorkspaces.filter((workspace) => matchesWorkspaceQuery(workspace, query));
+  const page = getWorkspaceRenderSlice(visible, renderLimit);
+  count.textContent = query ? `${visible.length} / ${activeWorkspaces.length} 条活跃记录` : `${activeWorkspaces.length} 条活跃记录`;
   if (visible.length === 0) {
     list.append(createElement('p', 'empty-state', query ? '没有匹配的工作区。' : '还没有存下任何工作区。'));
   } else {
-    appendGroup('置顶', visible.filter((workspace) => workspace.pinned));
-    appendGroup('时间线', visible.filter((workspace) => !workspace.pinned));
+    appendGroup('置顶', page.items.filter((workspace) => workspace.pinned));
+    appendGroup('时间线', page.items.filter((workspace) => !workspace.pinned));
   }
+  loadMore.hidden = !page.hasMore;
+  loadMore.textContent = page.hasMore ? `再显示 ${Math.min(DEFAULT_WORKSPACE_RENDER_LIMIT, page.remainingCount)} 条` : '';
+  renderArchiveDrawer(archivedWorkspaces);
   renderUndo();
+  renderBackupSelection();
+  renderStorageHealth();
+  renderTrash();
+  renderRestoreProgress();
+}
+
+function createPromptCard(prompt) {
+  const card = createElement('article', 'prompt-card');
+  const heading = createElement('div', 'prompt-card-heading');
+  heading.append(createElement('h3', 'prompt-title', prompt.title));
+  const tags = createElement('div', 'prompt-card-tags');
+  for (const tag of prompt.tags ?? [prompt.category]) {
+    if (tag) tags.append(createElement('span', 'prompt-tag-badge', tag));
+  }
+  const content = createElement('p', 'prompt-content', prompt.content);
+  const meta = createElement('span', 'prompt-meta', `更新于 ${formatTime(prompt.updatedAt)}`);
+  const actions = createElement('div', 'prompt-actions');
+  const copy = createElement('button', 'button button-restore', '📋 复制');
+  copy.type = 'button';
+  copy.addEventListener('click', () => copyPrompt(prompt));
+  const edit = createElement('button', 'button', '✏️ 编辑');
+  edit.type = 'button';
+  edit.addEventListener('click', () => openPromptDialog(prompt));
+  const remove = createElement('button', 'button button-danger', '🗑️ 删除');
+  remove.type = 'button';
+  remove.addEventListener('click', () => deletePromptById(prompt.id));
+  actions.append(copy, edit, remove);
+  card.append(heading, tags, content, meta, actions);
+  return card;
+}
+
+function createPromptTagPill({ name, count }) {
+  const button = createElement('button', 'tag-pill', count === undefined ? name : `${name} ${count}`);
+  button.type = 'button';
+  button.dataset.tag = name;
+  button.classList.toggle('is-active', name === activePromptTag);
+  button.addEventListener('click', () => {
+    activePromptTag = name;
+    renderPromptBoard();
+  });
+  return button;
+}
+
+function renderPromptTags() {
+  const rankedTags = getAllTags(prompts);
+  const allPill = createPromptTagPill({ name: 'all' });
+  allPill.textContent = '全部';
+  const topTags = rankedTags.slice(0, TOP_TAG_LIMIT);
+  const remainingTags = rankedTags.slice(TOP_TAG_LIMIT);
+  promptTags.replaceChildren(allPill, ...topTags.map(createPromptTagPill));
+
+  if (remainingTags.length) {
+    const moreTags = createElement('details', 'more-tags-dropdown');
+    const summary = createElement('summary', '', `更多标签 (${remainingTags.length})`);
+    const options = createElement('div', 'more-tags-options');
+    options.append(...remainingTags.map(createPromptTagPill));
+    moreTags.append(summary, options);
+    promptTags.append(moreTags);
+  }
+}
+
+function renderPromptBoard() {
+  renderPromptTags();
+  promptList.replaceChildren();
+  const visiblePrompts = filterPrompts(prompts, { tag: activePromptTag, query: promptQuery });
+  if (!visiblePrompts.length) {
+    const message = prompts.length ? '没有匹配的提示词。' : '还没有提示词。新建一条，开始积累自己的提示词库。';
+    promptList.append(createElement('p', 'empty-state', message));
+    return;
+  }
+  for (const prompt of visiblePrompts) promptList.append(createPromptCard(prompt));
+}
+
+async function refreshPrompts() {
+  const stored = await chrome.storage.local.get('prompts');
+  prompts = Array.isArray(stored.prompts) ? stored.prompts : [];
+  renderPromptBoard();
+}
+
+async function persistPrompts(nextPrompts) {
+  prompts = nextPrompts;
+  await chrome.storage.local.set({ prompts });
+  renderPromptBoard();
+}
+
+async function writePromptText(content, successMessage) {
+  try {
+    await navigator.clipboard.writeText(content);
+    showToast(successMessage);
+    return true;
+  } catch {
+    setPromptStatus('无法访问剪贴板，请检查浏览器权限。');
+    return false;
+  }
+}
+
+async function copyPrompt(prompt) {
+  const variables = extractVariables(prompt.content);
+  if (!variables.length) {
+    await writePromptText(prompt.content, '已复制到剪贴板');
+    return;
+  }
+  openPromptFillModal(prompt, variables);
+}
+
+function openPromptFillModal(prompt, variables) {
+  fillingPrompt = prompt;
+  promptFillTitle.textContent = `填写参数：${prompt.title}`;
+  promptFillDescription.textContent = '填写后按 Enter 复制；也可直接复制未替换的模板原文。';
+  promptFillFields.replaceChildren();
+  const inputs = variables.map(({ name, defaultValue }) => {
+    const label = createElement('label', '', name);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = defaultValue;
+    input.dataset.variableName = name;
+    input.setAttribute('aria-label', name);
+    label.append(input);
+    promptFillFields.append(label);
+    return input;
+  });
+  promptFillModal.showModal();
+  requestAnimationFrame(() => inputs[0]?.focus());
+}
+
+async function copyFilledPrompt() {
+  if (!fillingPrompt) return;
+  const values = Object.fromEntries([...promptFillFields.querySelectorAll('input')]
+    .map((input) => [input.dataset.variableName, input.value]));
+  const rendered = renderTemplate(fillingPrompt.content, values);
+  if (await writePromptText(rendered, '已填入并复制')) promptFillModal.close();
+}
+
+async function copyPromptOriginal() {
+  if (!fillingPrompt) return;
+  if (await writePromptText(fillingPrompt.content, '已复制模板原文')) promptFillModal.close();
+}
+
+function renderPromptTagSuggestions() {
+  promptTagSuggestions.replaceChildren();
+  for (const { name } of getAllTags(prompts).slice(0, 10)) {
+    const suggestion = createElement('button', 'tag-suggestion', name);
+    suggestion.type = 'button';
+    suggestion.addEventListener('click', () => {
+      const existing = promptTagInput.value.split(/[\s,]+/).filter(Boolean);
+      if (!existing.includes(name)) existing.push(name);
+      promptTagInput.value = existing.join(', ');
+      promptTagInput.focus();
+    });
+    promptTagSuggestions.append(suggestion);
+  }
+}
+
+function openPromptDialog(prompt = null) {
+  editingPromptId = prompt?.id ?? null;
+  promptDialogTitle.textContent = prompt ? '编辑提示词' : '新建提示词';
+  promptTitle.value = prompt?.title ?? '';
+  promptTagInput.value = (prompt?.tags ?? [prompt?.category ?? '通用']).filter(Boolean).join(', ');
+  promptContent.value = prompt?.content ?? '';
+  renderPromptTagSuggestions();
+  promptDialog.showModal();
+  promptTitle.focus();
+}
+
+async function deletePromptById(promptId) {
+  const prompt = prompts.find((item) => item.id === promptId);
+  if (!prompt || !globalThis.confirm(`删除提示词「${prompt.title}」？`)) return;
+  await persistPrompts(deletePrompt(prompts, promptId));
+  setPromptStatus('提示词已删除。');
+}
+
+function downloadPrompts() {
+  const blob = new Blob([exportPromptsPayload(prompts)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `tab-vault-prompts-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  setPromptStatus(`已备份 ${prompts.length} 条提示词。`);
 }
 
 function renderUndo() {
@@ -151,8 +639,39 @@ function renderUndo() {
 }
 
 async function refresh() {
-  state = await sendMessage({ type: 'get-state' });
+  const nextState = await sendMessage({ type: 'get-state' });
+  state = {
+    ...nextState,
+    workspaces: (Array.isArray(nextState.workspaces) ? nextState.workspaces : []).map((workspace) => ({
+      ...workspace,
+      status: workspace.status === 'archived' ? 'archived' : 'active',
+      archivedAt: workspace.archivedAt || null,
+    })),
+  };
   render();
+}
+
+async function downloadBackup(workspaceIds) {
+  const result = await sendMessage({ type: 'export-workspaces', workspaceIds });
+  if (!result.exported) {
+    setStatus('没有可导出的工作区。');
+    return;
+  }
+  const blob = new Blob([JSON.stringify(result.payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `tab-vault-${new Date().toISOString().slice(0, 10)}.tabvault.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  setStatus(`已导出 ${result.payload.workspaces.length} 个工作区。`);
+}
+
+function clearImportPreview() {
+  pendingImportText = null;
+  importPreview.hidden = true;
+  importPreviewText.textContent = '';
+  importFile.value = '';
 }
 
 async function saveAppearance() {
@@ -191,13 +710,25 @@ async function loadAppearance() {
 
 document.querySelector('#undo-save').addEventListener('click', async () => {
   const result = await sendMessage({ type: 'undo-save' });
-  setStatus(result.undone ? `已恢复 ${result.restoredCount} 个标签。` : '撤销时间已过。');
+  setStatus(result.undone ? restoreResultMessage({ restored: true, ...result }, true) : '撤销时间已过。');
   await refresh();
 });
 
 searchInput.addEventListener('input', () => {
   query = searchInput.value;
+  renderLimit = DEFAULT_WORKSPACE_RENDER_LIMIT;
   render();
+});
+
+loadMore.addEventListener('click', () => {
+  renderLimit += DEFAULT_WORKSPACE_RENDER_LIMIT;
+  render();
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type !== 'restore-progress' || message.restoreJobId !== activeRestoreJob) return;
+  currentRestoreProgress = message;
+  renderRestoreProgress();
 });
 
 document.addEventListener('visibilitychange', () => {
@@ -205,18 +736,127 @@ document.addEventListener('visibilitychange', () => {
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== 'local' || !changes.undo) return;
-  state = { ...state, undo: changes.undo.newValue ?? null };
-  renderUndo();
+  if (areaName !== 'local') return;
+  if (changes.workspaces || changes.trash) {
+    void refresh();
+    return;
+  }
+  if (changes.undo) {
+    state = { ...state, undo: changes.undo.newValue ?? null };
+    renderUndo();
+  }
+  if (changes.prompts) {
+    prompts = Array.isArray(changes.prompts.newValue) ? changes.prompts.newValue : [];
+    renderPromptBoard();
+  }
 });
 
-document.querySelector('#appearance-toggle').addEventListener('click', () => {
-  appearancePanel.hidden = !appearancePanel.hidden;
+workspaceTab.addEventListener('click', () => selectView('workspaces'));
+promptTab.addEventListener('click', () => selectView('prompts'));
+window.addEventListener('hashchange', syncViewWithHash);
+
+function openWorkspacePanel(panel) {
+  if (activeView === 'prompts') selectView('workspaces');
+  setPanel(panel, panel.hidden);
+}
+
+document.querySelector('#backup-toggle').addEventListener('click', () => openWorkspacePanel(backupPanel));
+document.querySelector('#backup-close').addEventListener('click', () => setPanel(backupPanel, false));
+document.querySelector('#trash-toggle').addEventListener('click', () => openWorkspacePanel(trashPanel));
+document.querySelector('#trash-close').addEventListener('click', () => setPanel(trashPanel, false));
+document.querySelector('#appearance-toggle').addEventListener('click', () => setPanel(appearancePanel, appearancePanel.hidden));
+document.querySelector('#appearance-close').addEventListener('click', () => setPanel(appearancePanel, false));
+
+document.querySelector('#export-all').addEventListener('click', () => downloadBackup());
+exportSelected.addEventListener('click', () => downloadBackup([...selectedWorkspaces]));
+
+async function setSelectedPinState(pinned) {
+  if (!selectedWorkspaces.size) return;
+  const result = await sendMessage({
+    type: 'set-workspaces-pin',
+    workspaceIds: [...selectedWorkspaces],
+    pinned,
+  });
+  setStatus(result.pinned
+    ? `已${pinned ? '置顶' : '取消置顶'} ${result.updatedCount} 个工作区。`
+    : '请先选择工作区。');
+  selectedWorkspaces.clear();
+  await refresh();
+}
+
+pinSelected.addEventListener('click', () => setSelectedPinState(true));
+unpinSelected.addEventListener('click', () => setSelectedPinState(false));
+
+importFile.addEventListener('change', async () => {
+  const file = importFile.files?.[0];
+  if (!file) return;
+  if (file.size > 20 * 1024 * 1024) {
+    setStatus('备份文件过大，未读取。');
+    clearImportPreview();
+    return;
+  }
+  pendingImportText = await file.text();
+  const preview = await sendMessage({ type: 'preview-import', text: pendingImportText });
+  if (!preview.valid) {
+    setStatus(importFailureMessage(preview.reason));
+    clearImportPreview();
+    return;
+  }
+  importPreviewText.textContent = importPreviewMessage(preview);
+  importPreviewText.textContent += ` 预计占用 ${formatStorageUsage({
+    bytesInUse: preview.estimatedBytesAfterImport,
+    quotaBytes: preview.quotaBytes,
+  })}。`;
+  importConfirm.disabled = preview.importedCount === 0;
+  if (!preview.willFit) {
+    importConfirm.disabled = true;
+    setStatus('导入后会超过本地空间上限。');
+  }
+  importPreview.hidden = false;
 });
 
-appearanceClose.addEventListener('click', () => {
-  appearancePanel.hidden = true;
-  document.querySelector('#appearance-toggle').focus();
+importConfirm.addEventListener('click', async () => {
+  if (!pendingImportText) return;
+  const result = await sendMessage({ type: 'import-workspaces', text: pendingImportText });
+  if (!result.imported) {
+    setStatus(importFailureMessage(result.reason));
+    return;
+  }
+  setStatus(`已导入 ${result.importedCount} 个工作区，跳过 ${result.duplicateCount} 个重复。`);
+  clearImportPreview();
+  selectedWorkspaces.clear();
+  await refresh();
+});
+
+document.querySelector('#import-cancel').addEventListener('click', clearImportPreview);
+
+trashSelected.addEventListener('click', async () => {
+  if (!selectedWorkspaces.size || !globalThis.confirm(`将选中的 ${selectedWorkspaces.size} 个工作区移入回收站？`)) return;
+  const result = await sendMessage({ type: 'delete-workspaces', workspaceIds: [...selectedWorkspaces] });
+  setStatus(result.deleted ? `已将 ${result.deletedCount} 个工作区移入回收站。` : '请先选择工作区。');
+  selectedWorkspaces.clear();
+  await refresh();
+});
+
+emptyTrash.addEventListener('click', async () => {
+  if (!state.trash.length || !globalThis.confirm('永久清空回收站？')) return;
+  await sendMessage({ type: 'empty-trash' });
+  setStatus('回收站已清空。');
+  await refresh();
+});
+
+retryRestore.addEventListener('click', () => {
+  if (lastRetry) void restore(
+    lastRetry.workspaceId,
+    lastRetry.tabIndexes,
+    lastRetry.windowId,
+    lastRetry.existingGroupIds,
+  );
+});
+
+document.querySelector('#dismiss-restore-report').addEventListener('click', () => {
+  restoreReport.hidden = true;
+  lastRetry = null;
 });
 
 backgroundFile.addEventListener('change', async () => {
@@ -237,14 +877,12 @@ backgroundDim.addEventListener('input', () => {
   appearance.dim = Number(backgroundDim.value);
   document.documentElement.style.setProperty('--background-dim', String(appearance.dim / 100));
 });
-
 backgroundDim.addEventListener('change', saveAppearance);
 
 accentColor.addEventListener('input', () => {
   appearance.accent = normalizeAccentColor(accentColor.value);
   applyAccentColor();
 });
-
 accentColor.addEventListener('change', saveAppearance);
 
 backgroundRemove.addEventListener('click', async () => {
@@ -256,4 +894,62 @@ backgroundRemove.addEventListener('click', async () => {
   setStatus('已移除自定义背景。');
 });
 
-Promise.all([refresh(), loadAppearance()]);
+promptSearch.addEventListener('input', () => {
+  promptQuery = promptSearch.value;
+  renderPromptBoard();
+});
+
+document.querySelector('#new-prompt').addEventListener('click', () => openPromptDialog());
+document.querySelector('#export-prompts').addEventListener('click', downloadPrompts);
+document.querySelector('#prompt-dialog-close').addEventListener('click', () => promptDialog.close());
+document.querySelector('#prompt-cancel').addEventListener('click', () => promptDialog.close());
+document.querySelector('#prompt-fill-close').addEventListener('click', () => promptFillModal.close());
+document.querySelector('#prompt-fill-cancel').addEventListener('click', () => promptFillModal.close());
+document.querySelector('#prompt-copy-original').addEventListener('click', copyPromptOriginal);
+promptFillModal.addEventListener('click', (event) => {
+  if (event.target === promptFillModal) promptFillModal.close();
+});
+promptFillModal.addEventListener('close', () => {
+  fillingPrompt = null;
+});
+promptFillForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  await copyFilledPrompt();
+});
+
+promptForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const fields = {
+    title: promptTitle.value,
+    tags: promptTagInput.value.split(/[\s,]+/).filter(Boolean),
+    content: promptContent.value,
+  };
+  const nextPrompts = editingPromptId
+    ? updatePrompt(prompts, editingPromptId, fields)
+    : createPrompt(prompts, fields);
+  if (nextPrompts === prompts) {
+    setPromptStatus('标题和正文都不能为空。');
+    return;
+  }
+  await persistPrompts(nextPrompts);
+  promptDialog.close();
+  setPromptStatus(editingPromptId ? '提示词已更新。' : '提示词已新建。');
+  editingPromptId = null;
+});
+
+importPrompts.addEventListener('change', async () => {
+  const file = importPrompts.files?.[0];
+  if (!file) return;
+  const result = importPromptsPayload(prompts, await file.text(), { mode: 'merge' });
+  importPrompts.value = '';
+  if (!result.ok) {
+    setPromptStatus('提示词导入失败：文件格式无效。');
+    return;
+  }
+  const addedCount = result.prompts.length - prompts.length;
+  await persistPrompts(result.prompts);
+  setPromptStatus(`已导入 ${addedCount} 条提示词，重复内容已跳过。`);
+});
+
+syncViewWithHash();
+Promise.all([refresh(), refreshPrompts(), loadAppearance()]);
